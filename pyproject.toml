@@ -1,7 +1,7 @@
 [project]
 name = "asap"
 version = "0.1.0"
-description = "Add your description here"
+description = "Active Safe-Agentic Pipeline (ASAP): Agnostic Runtime Safety and Guardrail Framework for Software Engineering Agents"
 readme = "README.md"
 authors = [
     { name = "Franco Ariel Demare", email = "frandemare@gmail.com" }

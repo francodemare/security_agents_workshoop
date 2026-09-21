@@ -1,71 +1,71 @@
 # 🛡️ ASAP: Active Safe-Agentic Pipeline
 
-> **Capa de seguridad, control en tiempo de ejecución y rollback transaccional para agentes de software (LangChain, LangGraph, ReAct y agentes personalizados).**
+> **Agnostic runtime guardrails, behavioral monitoring, and transactional rollback framework for software engineering agents (LangChain, LangGraph, CrewAI, AutoGen, and custom ReAct loops).**
 
 ---
 
-## 📌 ¿Qué es ASAP?
+## 📌 What is ASAP?
 
-Cuando un agente de Inteligencia Artificial tiene acceso a la terminal y al sistema de archivos, pueden ocurrir fallos críticos:
-* **Entrar en bucles infinitos** repitiendo comandos que fallan una y otra vez.
-* **Romper el código del repositorio** o ejecutar comandos destructivos accidentales (`rm -rf`, sobreescritura errónea).
-* **Sufrir inyecciones de prompt** o intentos de exfiltrar credenciales (`.env`, llaves SSH).
-* **Hacer trampa en las pruebas (Proxy Gaming)** modificando tests para que pasen artificialmente sin arreglar el bug.
+When an AI agent is granted direct access to a terminal and file system, critical failure modes often emerge:
+* **Infinite reasoning and execution loops:** The agent repeatedly issues failing commands without making progress.
+* **Corrupted codebases and destructive operations:** Accidental or unconstrained system mutations (`rm -rf`, broken patches, or overwriting unintended files).
+* **Prompt injection and credential exfiltration:** Indirect attacks reading and leaking `.env` files, SSH keys, or API tokens.
+* **Proxy gaming and metric subversion (Reward Hacking):** The agent tampers with unit tests or assertions to force a "passing" status without solving the actual issue.
 
-**ASAP** actúa como un **interceptor de seguridad (middleware)** entre el agente y el sistema operativo. Supervisa cada paso en tiempo real, toma un punto de restauración ultrarrápido y, si algo sale mal o el agente se desvía, **revierte los cambios automáticamente**.
+**ASAP** serves as an **in-line safety interceptor (middleware)** between the agent and the operating system. It monitors execution in real time, creates instantaneous atomic snapshots, and **automatically rolls back changes** if an anomaly, safety violation, or tool failure occurs.
 
 ---
 
-## 🧱 Las Capas de Protección de ASAP
+## 🧱 ASAP Defense Architecture
 
 ```text
-       [ Agente de IA (ej: LangChain) ]
-                      │ (propone ejecutar una herramienta / bash)
-                      ▼
-   ┌──────────────────────────────────────────────┐
-   │ 1. CAITLYN (Filtro Tier-1)                  │ ──► Bloquea exfiltración e inyecciones de prompt
-   ├──────────────────────────────────────────────┤
-   │ 2. LIVEPLAN (Detector de bucles)            │ ──► Corta oscilaciones (A -> B -> A) y estancamiento
-   ├──────────────────────────────────────────────┤
-   │ 3. ACTSAFE (Barrera de riesgo)              │ ──► Evalúa incertidumbre con PyTorch (Apple Silicon / CPU)
-   ├──────────────────────────────────────────────┤
-   │ 4. Transactional Sandbox (Snapshot APFS)     │ ──► Punto de restauración Copy-on-Write en < 30ms
-   │    └── Ejecución real del comando / tool    │
-   ├──────────────────────────────────────────────┤
-   │ 5. EST (Anti-Proxy Gaming)                  │ ──► Mutaciones de código para detectar trampas en tests
-   └──────────────────────────────────────────────┘
-                      │
-           ✅ Seguro  │  ❌ Violación / Error
-                      ▼
-             [ Commit Cambios ]        [ Rollback Automático ]
+         [ AI Agent (e.g., LangChain / ReAct) ]
+                            │ (proposes tool / bash action)
+                            ▼
+     ┌──────────────────────────────────────────────┐
+     │ 1. CAITLYN (Tier-1 Intent Guard)             │ ──► Blocks credential exfiltration & prompt injections
+     ├──────────────────────────────────────────────┤
+     │ 2. LIVEPLAN (Deterministic Process Monitor)  │ ──► Halts oscillations (A -> B -> A) & phase stagnation
+     ├──────────────────────────────────────────────┤
+     │ 3. ACTSAFE (Pessimistic Safety Barrier)      │ ──► Evaluates uncertainty via PyTorch (Apple Silicon / CPU)
+     ├──────────────────────────────────────────────┤
+     │ 4. Transactional Sandbox (APFS CoW Snapshot) │ ──► Instantaneous Copy-on-Write snapshot (< 30ms)
+     │    └── Isolated Execution (SubprocessRunner) │
+     ├──────────────────────────────────────────────┤
+     │ 5. EST (Evaluator Stress Test)               │ ──► AST mutations to expose fake test passes (Proxy Gaming)
+     └──────────────────────────────────────────────┘
+                            │
+               ✅ Safe      │  ❌ Violation / Tool Error
+                            ▼
+                   [ Commit State ]        [ Atomic Rollback ]
 ```
 
 ---
 
-## 🚀 Inicio Rápido
+## 🚀 Quickstart
 
-### 1. Requisitos e Instalación
+### 1. Requirements & Installation
 
-El proyecto utiliza [`uv`](https://github.com/astral-sh/uv) para la gestión de dependencias y optimización en macOS (Apple Silicon MPS) o Linux/Windows (CPU):
+ASAP uses [`uv`](https://github.com/astral-sh/uv) for fast, deterministic dependency management, optimized for both macOS (Apple Silicon MPS) and Linux/Windows (CPU):
 
 ```bash
-# Clonar el repositorio y sincronizar el entorno
-git clone <url-del-repo>
+# Clone the repository and sync virtual environment
+git clone <repo-url>
 cd security_agents_workshoop
 uv sync
 ```
 
-### 2. Ejecutar la Suite de Pruebas
+### 2. Run the Test Suite
 
-Verifica que las 20 pruebas unitarias y de integración pasen correctamente:
+Run the full automated test suite (20 unit and integration tests):
 
 ```bash
 uv run pytest -v
 ```
 
-### 3. Probar la Demostración Interactiva
+### 3. Run the Interactive LangChain Demo
 
-Ejecuta el script de ejemplo que simula un agente de LangChain intentando acciones benignas, ataques y bucles:
+Experience the guardrail in action as it simulates a LangChain agent encountering benign requests, injection attacks, tool errors, and reasoning loops:
 
 ```bash
 uv run python examples/demo_langchain_agent.py
@@ -73,86 +73,88 @@ uv run python examples/demo_langchain_agent.py
 
 ---
 
-## 💡 ¿Cómo Integrarlo con tus Agentes?
+## 💡 How to Integrate with Your Agents
 
-### Opción A: Con LangChain / LangGraph
+### Option A: LangChain / LangGraph (Plug-and-Play Callback)
 
-Simplemente pasa el callback de ASAP al invocar tu agente:
+Attach the `ASAPCallbackHandler` directly to your agent's execution configuration:
 
 ```python
 from asap import ASAPPipeline
 
-# 1. Inicializar ASAP en el directorio de trabajo del agente
-pipeline = ASAPPipeline(workspace_dir="./mi_proyecto")
+# 1. Initialize the pipeline for your target workspace
+pipeline = ASAPPipeline(workspace_dir="./my_workspace")
 
-# 2. Obtener el callback handler para LangChain
+# 2. Get the LangChain-compatible callback handler
 asap_callback = pipeline.get_langchain_callback()
 
-# 3. Vincularlo a la ejecución de tu agente
-# agent_executor.invoke({"input": "Resuelve el issue #42"}, config={"callbacks": [asap_callback]})
+# 3. Attach to your LangChain agent executor
+# agent_executor.invoke(
+#     {"input": "Resolve issue #104"},
+#     config={"callbacks": [asap_callback]}
+# )
 ```
 
-### Opción B: Decorador Universal `@asap_guard`
+### Option B: Universal `@asap_guard` Decorator
 
-Protege cualquier función o herramienta en frameworks como CrewAI, AutoGen o código propio:
+Guard individual functions or tools across arbitrary frameworks (CrewAI, AutoGen, or custom tool loops):
 
 ```python
 from asap import ASAPPipeline, asap_guard
 
-pipeline = ASAPPipeline(workspace_dir="./mi_proyecto")
+pipeline = ASAPPipeline(workspace_dir="./my_workspace")
 
 @asap_guard(pipeline, action_type="bash")
-def ejecutar_comando_terminal(comando: str):
-    # Si la acción es peligrosa, ASAP lanza una excepción antes de ejecutarla.
-    # Si la función falla, el espacio de trabajo se restaura automáticamente.
+def run_terminal_command(command: str):
+    # If the command violates policy, ASAP raises a PermissionError before execution.
+    # If execution crashes or times out, all workspace mutations are cleanly rolled back.
     import subprocess
-    return subprocess.check_output(comando, shell=True).decode()
+    return subprocess.check_output(command, shell=True).decode()
 ```
 
-### Opción C: Ejecución Directa de Comandos Bash
+### Option C: Direct Guarded Bash Execution
 
 ```python
 from asap import ASAPPipeline
 
-pipeline = ASAPPipeline(workspace_dir="./mi_proyecto")
+pipeline = ASAPPipeline(workspace_dir="./my_workspace")
 
 verdict, result = pipeline.execute_bash("pytest tests/")
 if not verdict.is_safe:
-    print(f"Comando bloqueado: {verdict.message}")
+    print(f"Action blocked: {verdict.message}")
 else:
-    print(f"Salida: {result.stdout}")
+    print(f"Output:\n{result.stdout}")
 ```
 
 ---
 
-## 📂 Estructura del Proyecto
+## 📂 Project Structure
 
 ```text
 security_agents_workshoop/
-├── pyproject.toml              # Dependencias (PyTorch, LangChain Core, PyTest)
-├── asap/                       # Paquete principal de ASAP
-│   ├── core/                  # Tipos base, dataclasses y detección de hardware (MPS/CPU)
-│   ├── sandbox/               # Snapshots ACID con APFS Copy-on-Write y runner seguro
-│   ├── monitors/              # LIVEPLAN: GRAPHECTORY (grafos de ciclos) y LANGUTORY (fases)
-│   ├── evaluators/            # EST: Mutador AST y detector de Proxy Gaming
-│   ├── planner/               # ACTSAFE: Ensamble de modelos de mundo y optimizador LBSGD
-│   ├── adapters/              # Integraciones: LangChain, CAITLYN (Tier-1) y decorador @asap_guard
-│   └── pipeline.py            # Orquestador central de las capas de seguridad
+├── pyproject.toml              # Project dependencies (PyTorch, LangChain Core, PyTest)
+├── asap/                       # Main ASAP framework package
+│   ├── core/                  # Base types, dataclasses, and Apple Silicon MPS device configuration
+│   ├── sandbox/               # ACID snapshots with APFS Copy-on-Write and isolated runner
+│   ├── monitors/              # LIVEPLAN: GRAPHECTORY (trajectory cycles) and LANGUTORY (phases)
+│   ├── evaluators/            # EST: AST mutator and Proxy Gaming score calculator G(y)
+│   ├── planner/               # ACTSAFE: Epistemic uncertainty ensemble and LBSGD optimizer
+│   ├── adapters/              # Integrations: LangChain callback, CAITLYN (Tier-1), and @asap_guard
+│   └── pipeline.py            # Master orchestrator unifying all 5 security layers
 ├── examples/
-│   └── demo_langchain_agent.py # Ejemplo de uso protegiendo un agente LangChain
-└── tests/                     # Suite de pruebas automatizadas
+│   └── demo_langchain_agent.py # End-to-end runnable demo protecting a LangChain agent
+└── tests/                     # Comprehensive test suite (APFS, monitors, EST, ACTSAFE, pipeline)
 ```
 
 ---
 
-## 👤 Autor
+## 👤 Author
 
 * **Franco Ariel Demare**
 * **Email:** [frandemare@gmail.com](mailto:frandemare@gmail.com)
 
 ---
 
-## 📄 Licencia
+## 📄 License
 
-Desarrollado para experimentación y talleres de seguridad en agentes de software (2026).
-
+Developed for experimental security research and software engineering agent safety workshops (2026).
