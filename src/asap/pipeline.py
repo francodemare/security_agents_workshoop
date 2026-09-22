@@ -1,6 +1,6 @@
 """
 ASAP Pipeline: Consolidated orchestrator for agent safety and runtime guardrails.
-Integrates CAITLYN, LIVEPLAN, ACTSAFE, EST, and Transactional Sandbox.
+Integrates CAITLYN, LIVEPLAN, ACTSAFE, EST, Transactional Sandbox, and local Ollama (gemma4:12b).
 """
 
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -15,6 +15,7 @@ from asap.evaluators.est import EvaluatorStressTest
 from asap.planner.ensemble import WorldModelEnsemble
 from asap.planner.actsafe import ACTSAFEPlanner, encode_action_step
 from asap.adapters.caitlyn import CaitlynTier1Classifier
+from asap.providers.ollama_provider import OllamaProvider
 
 
 class ASAPPipeline:
@@ -22,6 +23,7 @@ class ASAPPipeline:
     Active Safe-Agentic Pipeline (ASAP).
     Governs agent actions before execution, maintains atomic snapshots,
     and stress-tests outcomes to prevent proxy gaming and system damage.
+    Supports local AI acceleration via Ollama (gemma4:12b).
     """
 
     def __init__(
@@ -33,18 +35,25 @@ class ASAPPipeline:
         max_immediate_repeats: int = 2,
         max_cycle_repetitions: int = 2,
         device: Optional[torch.device] = None,
+        ollama_provider: Optional[OllamaProvider] = None,
+        enable_semantic_audit: bool = False,
     ):
         self.workspace_dir = workspace_dir
         self.device = device or get_device()
+        self.ollama_provider = ollama_provider
 
         # Core layers
         self.sandbox = TransactionalSandbox(workspace_dir)
         self.runner = SubprocessRunner(workspace_dir)
-        self.caitlyn = CaitlynTier1Classifier()
+        self.caitlyn = CaitlynTier1Classifier(
+            semantic_provider=ollama_provider,
+            enable_semantic_audit=enable_semantic_audit,
+        )
         self.monitor = LivePlanMonitor(
             stagnation_threshold=stagnation_threshold,
             max_immediate_repeats=max_immediate_repeats,
             max_cycle_repetitions=max_cycle_repetitions,
+            advisor_provider=ollama_provider,
         )
         self.est = EvaluatorStressTest(tau_threshold=tau_threshold)
 
@@ -61,7 +70,7 @@ class ASAPPipeline:
         """
         Executes pre-execution safety gates:
         1. CAITLYN (Instruction Hierarchy / Prompt Injection)
-        2. LIVEPLAN (Oscillation and Stagnation)
+        2. LIVEPLAN (Oscillation and Stagnation + optional gemma4:12b advice)
         3. ACTSAFE (Pessimistic Safety Barrier)
         """
         # 1. CAITLYN check
@@ -84,7 +93,7 @@ class ASAPPipeline:
                 details=drift_meta,
             )
 
-        # 3. ACTSAFE risk check
+        # 3. ACTSAFE risk check (heuristic encoding or dense vector)
         action_vec = encode_action_step(step, action_dim=2).to(self.device)
         if state_tensor is None:
             state_tensor = torch.zeros((1, 4), device=self.device)
@@ -133,8 +142,7 @@ class ASAPPipeline:
         try:
             res = self.runner.run(command, timeout=timeout)
             if res.exit_code != 0 and not res.timed_out:
-                # Execution error
-                self.sandbox.commit()  # Non-zero exit code may be expected (e.g. test failed)
+                self.sandbox.commit()
                 return SafetyVerdict(
                     is_safe=True,
                     status="EXECUTION_RETURNED_NONZERO",

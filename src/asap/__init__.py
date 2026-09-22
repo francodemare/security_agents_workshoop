@@ -13,6 +13,7 @@ from asap.planner.actsafe import ACTSAFEPlanner
 from asap.pipeline import ASAPPipeline
 from asap.adapters.base import asap_guard
 from asap.adapters.langchain import ASAPCallbackHandler
+from asap.providers.ollama_provider import OllamaProvider
 
 __all__ = [
     "ASAPPipeline",
@@ -28,6 +29,7 @@ __all__ = [
     "ACTSAFEPlanner",
     "asap_guard",
     "ASAPCallbackHandler",
+    "OllamaProvider",
 ]
 
 __version__ = "0.1.0"

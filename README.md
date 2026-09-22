@@ -63,12 +63,16 @@ Run the full automated test suite (20 unit and integration tests):
 uv run pytest -v
 ```
 
-### 3. Run the Interactive LangChain Demo
+### 3. Run the Interactive Demos
 
-Experience the guardrail in action as it simulates a LangChain agent encountering benign requests, injection attacks, tool errors, and reasoning loops:
-
+Simulate a LangChain agent running with ASAP guardrails:
 ```bash
 uv run python examples/demo_langchain_agent.py
+```
+
+Or test native local AI integration with your locally installed **`gemma4:12b`** via Ollama on Apple Silicon:
+```bash
+uv run python examples/demo_gemma_pipeline.py
 ```
 
 ---
