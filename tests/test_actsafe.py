@@ -5,8 +5,9 @@ Tests for ACTSAFE Planner, World Model Ensemble, and PyTorch acceleration.
 import torch
 from asap.core.device import get_device
 from asap.planner.ensemble import WorldModelEnsemble
-from asap.planner.actsafe import ACTSAFEPlanner, encode_action_step
+from asap.planner.actsafe import ACTSAFEPlanner, ActionVectorProjector, encode_action_step
 from asap.core.types import ActionStep
+
 
 
 def test_ensemble_forward_and_uncertainty():
@@ -47,3 +48,18 @@ def test_action_encoding():
     vec_destr = encode_action_step(step_destructive, action_dim=2)
     # Destructiveness feature should be higher for rm
     assert vec_destr[0, 0] > vec_safe[0, 0]
+
+
+def test_action_vector_projector_nomic_embedding():
+    device = get_device()
+    projector = ActionVectorProjector(embedding_dim=768, action_dim=2).to(device)
+
+    # Simulate 768-dimensional embedding from nomic-embed-text
+    mock_embedding = torch.randn((1, 768), device=device)
+    heuristic_vec = torch.tensor([[0.5, -0.2]], device=device)
+
+    projected = projector(mock_embedding, heuristic_vec, alpha=0.6)
+    assert projected.shape == (1, 2)
+    assert torch.all(projected >= -1.0)
+    assert torch.all(projected <= 1.0)
+

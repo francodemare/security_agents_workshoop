@@ -65,15 +65,16 @@ uv run pytest -v
 
 ### 3. Run the Interactive Demos
 
+Run the local multi-model demonstration integrating **`qwen2.5-coder` (7B)** as executor, **`nomic-embed-text` (768-dim)** as ACTSAFE vector filter, and **`llama3.2:3b`** as LIVEPLAN live advisor on Apple Silicon:
+```bash
+uv run python examples/demo_multi_model_asap.py
+```
+
 Simulate a LangChain agent running with ASAP guardrails:
 ```bash
 uv run python examples/demo_langchain_agent.py
 ```
 
-Or test native local AI integration with your locally installed **`gemma4:12b`** via Ollama on Apple Silicon:
-```bash
-uv run python examples/demo_gemma_pipeline.py
-```
 
 ---
 

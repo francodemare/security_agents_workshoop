@@ -13,9 +13,10 @@ from asap.sandbox.runner import SubprocessRunner
 from asap.monitors.liveplan import LivePlanMonitor
 from asap.evaluators.est import EvaluatorStressTest
 from asap.planner.ensemble import WorldModelEnsemble
-from asap.planner.actsafe import ACTSAFEPlanner, encode_action_step
+from asap.planner.actsafe import ACTSAFEPlanner, ActionVectorProjector, encode_action_step
 from asap.adapters.caitlyn import CaitlynTier1Classifier
 from asap.providers.ollama_provider import OllamaProvider
+
 
 
 class ASAPPipeline:
@@ -57,12 +58,16 @@ class ASAPPipeline:
         )
         self.est = EvaluatorStressTest(tau_threshold=tau_threshold)
 
-        # PyTorch ACTSAFE planner
+        # PyTorch ACTSAFE planner & nomic-embed-text vector projector
         self.model_ensemble = WorldModelEnsemble(
             state_dim=4,
             action_dim=2,
             hidden_dim=64,
             ensemble_size=3,
+        ).to(self.device)
+        self.vector_projector = ActionVectorProjector(
+            embedding_dim=768,
+            action_dim=2,
         ).to(self.device)
         self.planner = ACTSAFEPlanner(self.model_ensemble, cost_limit=cost_limit)
 
@@ -70,8 +75,8 @@ class ASAPPipeline:
         """
         Executes pre-execution safety gates:
         1. CAITLYN (Instruction Hierarchy / Prompt Injection)
-        2. LIVEPLAN (Oscillation and Stagnation + optional gemma4:12b advice)
-        3. ACTSAFE (Pessimistic Safety Barrier)
+        2. LIVEPLAN (Oscillation and Stagnation + optional llama3.2 advice)
+        3. ACTSAFE (nomic-embed-text 768-dim dense embedding + Pessimistic Safety Barrier)
         """
         # 1. CAITLYN check
         is_safe_intent, caitlyn_msg = self.caitlyn.validate_action(step.command, step.thought)
@@ -93,8 +98,20 @@ class ASAPPipeline:
                 details=drift_meta,
             )
 
-        # 3. ACTSAFE risk check (heuristic encoding or dense vector)
-        action_vec = encode_action_step(step, action_dim=2).to(self.device)
+        # 3. ACTSAFE risk check (nomic-embed-text 768-dim embedding + heuristic fusion)
+        heuristic_vec = encode_action_step(step, action_dim=2).to(self.device)
+        embedding_vec = None
+        if self.ollama_provider and self.ollama_provider.is_available():
+            text_to_embed = f"{step.action_type}: {step.command} | {step.thought}".strip()
+            embedding_vec = self.ollama_provider.get_embedding(text_to_embed)
+
+        if embedding_vec is not None:
+            action_vec = self.vector_projector(embedding_vec.to(self.device), heuristic_vec)
+            vector_source = "nomic-embed-text (768-dim)"
+        else:
+            action_vec = heuristic_vec
+            vector_source = "heuristic_regex"
+
         if state_tensor is None:
             state_tensor = torch.zeros((1, 4), device=self.device)
         else:
@@ -110,15 +127,24 @@ class ASAPPipeline:
                 is_safe=False,
                 status="BLOCKED_BY_ACTSAFE",
                 message=msg,
-                details={"pessimistic_cost": pess_cost, "cost_limit": self.planner.d},
+                details={
+                    "pessimistic_cost": pess_cost,
+                    "cost_limit": self.planner.d,
+                    "vector_source": vector_source,
+                },
             )
 
         return SafetyVerdict(
             is_safe=True,
             status="SUCCESS",
             message="Action approved by pre-execution safety gates.",
-            details={"phase": drift_meta.get("phase", "unknown")},
+            details={
+                "phase": drift_meta.get("phase", "unknown"),
+                "vector_source": vector_source,
+                "pessimistic_cost": pess_cost,
+            },
         )
+
 
     def execute_bash(
         self,

@@ -48,7 +48,43 @@ def encode_action_step(step: ActionStep, action_dim: int = 2) -> torch.Tensor:
     return torch.tensor([features], dtype=torch.float32)
 
 
+class ActionVectorProjector(torch.nn.Module):
+    """
+    Neural projection layer mapping dense text embeddings (e.g., 768-dim from nomic-embed-text)
+    into the ACTSAFE continuous action/risk space on Apple Silicon (MPS) or CPU.
+    Combines dense semantic features with heuristic structural indicators.
+    """
+
+    def __init__(self, embedding_dim: int = 768, action_dim: int = 2):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.action_dim = action_dim
+        self.proj = torch.nn.Sequential(
+            torch.nn.Linear(embedding_dim, 64),
+            torch.nn.Tanh(),
+            torch.nn.Linear(64, action_dim),
+            torch.nn.Tanh(),
+        )
+
+    def forward(
+        self,
+        embedding: torch.Tensor,
+        heuristic_vec: Optional[torch.Tensor] = None,
+        alpha: float = 0.6,
+    ) -> torch.Tensor:
+        """
+        Projects dense embedding to action space in [-1.0, 1.0].
+        If heuristic_vec is provided, blends: alpha * semantic + (1 - alpha) * heuristic.
+        """
+        semantic_vec = self.proj(embedding.float())
+        if heuristic_vec is not None:
+            h_vec = heuristic_vec.to(embedding.device).float()
+            return alpha * semantic_vec + (1.0 - alpha) * h_vec
+        return semantic_vec
+
+
 class ACTSAFEPlanner:
+
     """
     Implements Log-Barrier SGD (LBSGD) and pessimistic safety verification.
     Ensures exploration does not exceed the cost threshold d under epistemic uncertainty.
