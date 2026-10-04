@@ -18,9 +18,11 @@ class ASAPCallbackHandler(BaseCallbackHandler):
     LangChain Callback Handler that intercepts tool executions,
     applying CAITLYN, LIVEPLAN, ACTSAFE pre-filtering and Transactional Sandbox snapshots.
     """
+    raise_error: bool = True
 
     def __init__(self, pipeline: Any):
         super().__init__()
+        self.raise_error = True
         self.pipeline = pipeline
         self.last_verdict: Optional[SafetyVerdict] = None
 
