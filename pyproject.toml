@@ -11,6 +11,7 @@ dependencies = [
     "langchain-core>=1.6.4",
     "numpy>=2.4.6",
     "ollama>=0.6.2",
+    "pandas>=3.0.6",
     "torch>=2.14.0",
 ]
 
@@ -22,3 +23,7 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "*_test.py", "benchmark_*.py"]
+
