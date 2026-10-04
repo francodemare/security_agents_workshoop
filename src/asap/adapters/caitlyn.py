@@ -1,6 +1,6 @@
 """
 CAITLYN: Tier-1 and Semantic Prompt/Intent Classifier for Indirect Injection and Instruction Hierarchy Enforcement.
-Implements the rules declared in AGY.md, with optional local LLM semantic audit via Ollama (llama3.2:3b).
+Implements the rules declared in AGENTS.md, with optional local LLM semantic audit via Ollama (llama3.2:3b).
 """
 
 import re
