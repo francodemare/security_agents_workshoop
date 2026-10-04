@@ -1,6 +1,9 @@
 """
 ASAP Pipeline: Consolidated orchestrator for agent safety and runtime guardrails.
-Integrates CAITLYN, LIVEPLAN, ACTSAFE, EST, Transactional Sandbox, and local Ollama (gemma4:12b).
+Integrates CAITLYN, LIVEPLAN, ACTSAFE, EST, Transactional Sandbox, and local Ollama models:
+  - Executor:                 qwen2.5-coder:latest
+  - CAITLYN Tier-2 / LIVEPLAN: llama3.2:3b
+  - ACTSAFE vector filter:     nomic-embed-text:latest
 """
 
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -13,7 +16,7 @@ from asap.sandbox.runner import SubprocessRunner
 from asap.monitors.liveplan import LivePlanMonitor
 from asap.evaluators.est import EvaluatorStressTest
 from asap.planner.ensemble import WorldModelEnsemble
-from asap.planner.actsafe import ACTSAFEPlanner, ActionVectorProjector, encode_action_step
+from asap.planner.actsafe import ACTSAFEPlanner, SemanticRiskAnchors, encode_action_step
 from asap.adapters.caitlyn import CaitlynTier1Classifier
 from asap.providers.ollama_provider import OllamaProvider
 
@@ -24,7 +27,7 @@ class ASAPPipeline:
     Active Safe-Agentic Pipeline (ASAP).
     Governs agent actions before execution, maintains atomic snapshots,
     and stress-tests outcomes to prevent proxy gaming and system damage.
-    Supports local AI acceleration via Ollama (gemma4:12b).
+    Supports local AI acceleration via Ollama (qwen2.5-coder, llama3.2:3b, nomic-embed-text).
     """
 
     def __init__(
@@ -37,11 +40,18 @@ class ASAPPipeline:
         max_cycle_repetitions: int = 2,
         device: Optional[torch.device] = None,
         ollama_provider: Optional[OllamaProvider] = None,
-        enable_semantic_audit: bool = False,
+        enable_semantic_audit: Optional[bool] = None,
+        semantic_alpha: float = 0.6,
+        enforce_workflow: bool = False,
     ):
         self.workspace_dir = workspace_dir
         self.device = device or get_device()
         self.ollama_provider = ollama_provider
+        self.semantic_alpha = semantic_alpha
+
+        # CAITLYN Tier-2 (llama3.2:3b) is on by default whenever a provider is supplied.
+        if enable_semantic_audit is None:
+            enable_semantic_audit = ollama_provider is not None
 
         # Core layers
         self.sandbox = TransactionalSandbox(workspace_dir)
@@ -55,29 +65,36 @@ class ASAPPipeline:
             max_immediate_repeats=max_immediate_repeats,
             max_cycle_repetitions=max_cycle_repetitions,
             advisor_provider=ollama_provider,
+            enforce_workflow=enforce_workflow,
         )
         self.est = EvaluatorStressTest(tau_threshold=tau_threshold)
 
-        # PyTorch ACTSAFE planner & nomic-embed-text vector projector
+        # PyTorch ACTSAFE planner & nomic-embed-text semantic risk anchors
         self.model_ensemble = WorldModelEnsemble(
             state_dim=4,
             action_dim=2,
             hidden_dim=64,
             ensemble_size=3,
         ).to(self.device)
-        self.vector_projector = ActionVectorProjector(
-            embedding_dim=768,
-            action_dim=2,
-        ).to(self.device)
+        self.risk_anchors = SemanticRiskAnchors(ollama_provider) if ollama_provider else None
         self.planner = ACTSAFEPlanner(self.model_ensemble, cost_limit=cost_limit)
+
+    def _models_used(self, mark: Optional[int]) -> Dict[str, Optional[str]]:
+        """Models that actually answered since ``mark`` (None entries = deterministic fallback)."""
+        if self.ollama_provider is None or mark is None:
+            return {}
+        return self.ollama_provider.models_used_since(mark)
 
     def pre_check(self, step: ActionStep, state_tensor: Optional[torch.Tensor] = None) -> SafetyVerdict:
         """
         Executes pre-execution safety gates:
-        1. CAITLYN (Instruction Hierarchy / Prompt Injection)
-        2. LIVEPLAN (Oscillation and Stagnation + optional llama3.2 advice)
-        3. ACTSAFE (nomic-embed-text 768-dim dense embedding + Pessimistic Safety Barrier)
+        1. CAITLYN (Instruction Hierarchy / Prompt Injection + llama3.2:3b semantic audit)
+        2. LIVEPLAN (Oscillation and Stagnation + optional llama3.2:3b advice)
+        3. ACTSAFE (nomic-embed-text semantic anchors + Pessimistic Safety Barrier)
+        Every verdict reports in ``details["models_used"]`` which model answered each stage.
         """
+        mark = self.ollama_provider.usage_mark() if self.ollama_provider else None
+
         # 1. CAITLYN check
         is_safe_intent, caitlyn_msg = self.caitlyn.validate_action(step.command, step.thought)
         if not is_safe_intent:
@@ -85,7 +102,7 @@ class ASAPPipeline:
                 is_safe=False,
                 status="BLOCKED_BY_CAITLYN",
                 message=caitlyn_msg,
-                details={"layer": "CAITLYN"},
+                details={"layer": "CAITLYN", "models_used": self._models_used(mark)},
             )
 
         # 2. LIVEPLAN check
@@ -95,19 +112,22 @@ class ASAPPipeline:
                 is_safe=False,
                 status="BLOCKED_BY_LIVEPLAN",
                 message=liveplan_msg,
-                details=drift_meta,
+                details={**drift_meta, "models_used": self._models_used(mark)},
             )
 
-        # 3. ACTSAFE risk check (nomic-embed-text 768-dim embedding + heuristic fusion)
+        # 3. ACTSAFE risk check (nomic-embed-text semantic anchors + heuristic fusion)
         heuristic_vec = encode_action_step(step, action_dim=2).to(self.device)
-        embedding_vec = None
-        if self.ollama_provider and self.ollama_provider.is_available():
+        semantic_vec = None
+        if self.risk_anchors is not None and self.ollama_provider.is_available():
             text_to_embed = f"{step.action_type}: {step.command} | {step.thought}".strip()
             embedding_vec = self.ollama_provider.get_embedding(text_to_embed)
+            if embedding_vec is not None:
+                semantic_vec = self.risk_anchors.score(embedding_vec)
 
-        if embedding_vec is not None:
-            action_vec = self.vector_projector(embedding_vec.to(self.device), heuristic_vec)
-            vector_source = "nomic-embed-text (768-dim)"
+        if semantic_vec is not None:
+            a = self.semantic_alpha
+            action_vec = a * semantic_vec.to(self.device) + (1.0 - a) * heuristic_vec
+            vector_source = "nomic-embed-text (768-dim, semantic anchors)"
         else:
             action_vec = heuristic_vec
             vector_source = "heuristic_regex"
@@ -117,6 +137,7 @@ class ASAPPipeline:
         else:
             state_tensor = state_tensor.to(self.device)
 
+        models_used = self._models_used(mark)
         mu_cost, sigma_ep, pess_cost, is_within_barrier = self.planner.evaluate_risk(state_tensor, action_vec)
         if not is_within_barrier:
             msg = (
@@ -131,6 +152,7 @@ class ASAPPipeline:
                     "pessimistic_cost": pess_cost,
                     "cost_limit": self.planner.d,
                     "vector_source": vector_source,
+                    "models_used": models_used,
                 },
             )
 
@@ -142,8 +164,10 @@ class ASAPPipeline:
                 "phase": drift_meta.get("phase", "unknown"),
                 "vector_source": vector_source,
                 "pessimistic_cost": pess_cost,
+                "models_used": models_used,
             },
         )
+
 
 
     def execute_bash(

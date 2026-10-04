@@ -57,20 +57,41 @@ uv sync
 
 ### 2. Run the Test Suite
 
-Run the full automated test suite (20 unit and integration tests):
+Run the full automated test suite (unit and integration tests; live Ollama tests run when the server is up):
 
 ```bash
 uv run pytest -v
 ```
 
-### 3. Run the Interactive Demos
+### 3. Local models (Ollama)
 
-Run the local multi-model demonstration integrating **`qwen2.5-coder` (7B)** as executor, **`nomic-embed-text` (768-dim)** as ACTSAFE vector filter, and **`llama3.2:3b`** as LIVEPLAN live advisor on Apple Silicon:
+Each stage that uses an LLM has one assigned local model (no other model, e.g. gemma, is accepted):
+
+| Role | Model | Stage |
+|---|---|---|
+| Executor agent | `qwen2.5-coder:latest` | action generation |
+| Advisor / semantic auditor | `llama3.2:3b` | LIVEPLAN remediation advice + CAITLYN Tier-2 (on by default when a provider is passed) |
+| Embeddings (768-dim) | `nomic-embed-text:latest` | ACTSAFE semantic risk anchors |
+
+EST, the sandbox, CAITLYN Tier-1 and GRAPHECTORY/LANGUTORY are deterministic and use no model.
+
+```bash
+ollama pull qwen2.5-coder:latest && ollama pull llama3.2:3b && ollama pull nomic-embed-text:latest
+uv run python scripts/verify_local_models.py   # table: stage -> expected vs invoked model (exit != 0 on mismatch)
+```
+
+If a model is missing the pipeline logs a warning and falls back to deterministic behaviour;
+use `OllamaProvider(strict=True)` to raise `OllamaModelError` instead. Every verdict reports
+`details["models_used"]`, and `provider.usage_log` records each call.
+
+### 4. Run the Interactive Demos
+
+Multi-model demo (executor + vector filter + live advisor on Apple Silicon):
 ```bash
 uv run python examples/demo_multi_model_asap.py
 ```
 
-Simulate a LangChain agent running with ASAP guardrails:
+Simulate a LangChain agent running with ASAP guardrails and local models:
 ```bash
 uv run python examples/demo_langchain_agent.py
 ```
@@ -88,7 +109,8 @@ Attach the `ASAPCallbackHandler` directly to your agent's execution configuratio
 from asap import ASAPPipeline
 
 # 1. Initialize the pipeline for your target workspace
-pipeline = ASAPPipeline(workspace_dir="./my_workspace")
+from asap import OllamaProvider
+pipeline = ASAPPipeline(workspace_dir="./my_workspace", ollama_provider=OllamaProvider())
 
 # 2. Get the LangChain-compatible callback handler
 asap_callback = pipeline.get_langchain_callback()
@@ -144,10 +166,12 @@ security_agents_workshoop/
 │   ├── monitors/              # LIVEPLAN: GRAPHECTORY (trajectory cycles) and LANGUTORY (phases)
 │   ├── evaluators/            # EST: AST mutator and Proxy Gaming score calculator G(y)
 │   ├── planner/               # ACTSAFE: Epistemic uncertainty ensemble and LBSGD optimizer
-│   ├── adapters/              # Integrations: LangChain callback, CAITLYN (Tier-1), and @asap_guard
+│   ├── adapters/              # Integrations: LangChain callback, CAITLYN (Tier-1/Tier-2), and @asap_guard
+│   ├── providers/             # OllamaProvider: qwen2.5-coder / llama3.2:3b / nomic-embed-text
 │   └── pipeline.py            # Master orchestrator unifying all 5 security layers
-├── examples/
-│   └── demo_langchain_agent.py # End-to-end runnable demo protecting a LangChain agent
+├── examples/                   # demo_langchain_agent.py, demo_multi_model_asap.py
+├── scripts/
+│   └── verify_local_models.py  # Verifies each stage uses its assigned local model
 └── tests/                     # Comprehensive test suite (APFS, monitors, EST, ACTSAFE, pipeline)
 ```
 

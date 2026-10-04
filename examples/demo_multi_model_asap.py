@@ -145,11 +145,15 @@ def run_multi_model_demo():
         print(f"Detalle:   {v_leak.message}")
 
         print("\n" + "=" * 72)
-        print("✅ VERIFICACIÓN MULTI-MODELO COMPLETADA EXITOSAMENTE")
-        print("   - Agente Ejecutor:       qwen2.5-coder (7B) activo")
-        print("   - Filtro Vectorial MPS:  nomic-embed-text (768-dim) proyectado en PyTorch")
-        print("   - Asesor de Proceso:     llama3.2:3b respondiendo a derivas de LIVEPLAN")
-        print("   - Memoria Unificada:     Óptima y estable (< 10 GB VRAM)")
+        print("📋 Modelos realmente invocados (provider.usage_log):")
+        for entry in provider.usage_log:
+            status = "OK" if entry["ok"] else "FALLBACK"
+            print(f"   - {entry['role']:<9} {entry['model']:<26} {entry['latency_s']:>6.2f}s  {status}")
+        fallbacks = [e for e in provider.usage_log if not e["ok"]]
+        if fallbacks:
+            print(f"⚠️  {len(fallbacks)} llamada(s) usaron fallback determinista.")
+        else:
+            print("✅ VERIFICACIÓN MULTI-MODELO COMPLETADA: ninguna etapa usó fallback.")
         print("=" * 72)
 
     finally:

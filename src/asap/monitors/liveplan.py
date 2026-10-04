@@ -1,7 +1,7 @@
 """
 Consolidated LIVEPLAN Process Monitor.
 Combines GRAPHECTORY (cycle/oscillation detection) and LANGUTORY (phase stagnation detection),
-with optional local LLM remediation advice via Ollama (gemma4:12b).
+with optional local LLM remediation advice via Ollama (llama3.2:3b).
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,12 +22,16 @@ class LivePlanMonitor:
         max_immediate_repeats: int = 2,
         max_cycle_repetitions: int = 2,
         advisor_provider: Optional[Any] = None,
+        enforce_workflow: bool = False,
     ):
         self.graphectory = GraphectoryMonitor(
             max_immediate_repeats=max_immediate_repeats,
             max_cycle_repetitions=max_cycle_repetitions,
         )
-        self.langutory = LangutoryMonitor(stagnation_threshold=stagnation_threshold)
+        self.langutory = LangutoryMonitor(
+            stagnation_threshold=stagnation_threshold,
+            enforce_workflow=enforce_workflow,
+        )
         self.advisor_provider = advisor_provider
 
     def update_and_check(self, step: ActionStep) -> Tuple[bool, str, Dict[str, Any]]:
@@ -40,19 +44,23 @@ class LivePlanMonitor:
         if is_oscillating:
             advice = self.get_remediation_advice(osc_msg)
             full_msg = f"{osc_msg} -> Consejo: {advice}" if advice else osc_msg
-            return True, full_msg, {"violation": "oscillation", "advice": advice}
+            return True, full_msg, {"violation": "oscillation", "advice": advice, "advisor_model": self._advisor_model()}
 
         # 2. Langutory check
         is_stagnated, stag_msg, phase = self.langutory.check_and_add(step)
         if is_stagnated:
+            violation_type = "plan_violation" if "Violación del plan de ejecución" in stag_msg else "stagnation"
             advice = self.get_remediation_advice(stag_msg)
             full_msg = f"{stag_msg} -> Consejo: {advice}" if advice else stag_msg
-            return True, full_msg, {"violation": "stagnation", "phase": phase.value, "advice": advice}
+            return True, full_msg, {"violation": violation_type, "phase": phase.value, "advice": advice, "advisor_model": self._advisor_model()}
 
         return False, "OK", {"phase": phase.value}
 
+    def _advisor_model(self) -> Optional[str]:
+        return getattr(self.advisor_provider, "advisor_model", None)
+
     def get_remediation_advice(self, drift_msg: str) -> Optional[str]:
-        """Queries the advisor provider (gemma4:12b) for actionable corrective instructions."""
+        """Queries the advisor provider (llama3.2:3b) for actionable corrective instructions."""
         if self.advisor_provider and hasattr(self.advisor_provider, "generate_remediation"):
             recent_cmds = [h.split("::")[-1] for h in self.graphectory.history]
             return self.advisor_provider.generate_remediation(drift_msg, recent_cmds)

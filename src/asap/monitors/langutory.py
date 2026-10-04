@@ -30,8 +30,9 @@ class LangutoryMonitor:
         r"^(ruff|flake8|mypy|black|eslint|tsc)\b",
     ]
 
-    def __init__(self, stagnation_threshold: int = 5):
+    def __init__(self, stagnation_threshold: int = 5, enforce_workflow: bool = False):
         self.stagnation_threshold = stagnation_threshold
+        self.enforce_workflow = enforce_workflow
         self.phase_history: List[PhaseType] = []
 
     def classify_phase(self, step: ActionStep) -> PhaseType:
@@ -64,10 +65,18 @@ class LangutoryMonitor:
 
     def check_and_add(self, step: ActionStep) -> Tuple[bool, str, PhaseType]:
         """
-        Records phase and checks for long stagnation.
-        Returns (is_stagnated, message, identified_phase).
+        Records phase and checks for long stagnation or workflow violations.
+        Returns (has_violation, message, identified_phase).
         """
         phase = self.classify_phase(step)
+
+        # Check execution plan workflow violations if enabled
+        if self.enforce_workflow:
+            if phase == PhaseType.PATCH and not any(p in self.phase_history for p in (PhaseType.NAVIGATE, PhaseType.REPRODUCE)):
+                return True, (
+                    "[LANGUTORY Alert] Violación del plan de ejecución: Intento de emitir parche sin fase obligatoria previa (NAVIGATE/REPRODUCE)."
+                ), phase
+
         self.phase_history.append(phase)
 
         if len(self.phase_history) >= self.stagnation_threshold:

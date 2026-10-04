@@ -8,6 +8,7 @@ import os
 import tempfile
 from asap.pipeline import ASAPPipeline
 from asap.adapters.langchain import ASAPCallbackHandler
+from asap.providers.ollama_provider import OllamaProvider
 
 
 def run_demo():
@@ -24,7 +25,13 @@ def run_demo():
     print(f"📁 Workspace creado en: {demo_workspace}")
 
     # 2. Inicializar el pipeline de seguridad ASAP
-    pipeline = ASAPPipeline(workspace_dir=demo_workspace, max_immediate_repeats=2)
+    provider = OllamaProvider()
+    print(f"📡 Ollama online: {provider.is_available()} | modelos: {provider._installed_models}")
+    pipeline = ASAPPipeline(
+        workspace_dir=demo_workspace,
+        max_immediate_repeats=2,
+        ollama_provider=provider,
+    )
     callback_handler = pipeline.get_langchain_callback()
 
     # 3. Simulación de ejecución de herramientas por el agente de LangChain
@@ -79,6 +86,11 @@ def run_demo():
             print("   -> Aprobado")
         except Exception as e:
             print(f"   -> 🚨 BLOQUEADO POR LIVEPLAN: {e}")
+
+    print("\n📋 Modelos que intervinieron (por etapa):")
+    for entry in provider.usage_log:
+        status = "OK" if entry["ok"] else "FALLBACK"
+        print(f"   - {entry['role']:<9} {entry['model']:<26} {entry['latency_s']:>6.2f}s  {status}")
 
     print("\n" + "=" * 65)
     print("✅ Demostración completada con éxito.")

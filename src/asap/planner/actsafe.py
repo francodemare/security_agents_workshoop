@@ -83,6 +83,77 @@ class ActionVectorProjector(torch.nn.Module):
         return semantic_vec
 
 
+class SemanticRiskAnchors:
+    """
+    Deterministic semantic risk scorer for ACTSAFE based on nomic-embed-text.
+
+    Reference descriptions ("anchors") for destructive, network/exfiltration and benign actions are
+    embedded once (and cached). For each feature the score is
+        tanh(gain * (max cos-sim to risky anchors - max cos-sim to benign anchors))
+    which yields stable values in [-1, 1] with the same convention as ``encode_action_step``
+    (-1 = no risk, +1 = maximum risk).
+    """
+
+    DESTRUCTIVE_ANCHORS = [
+        "rm -rf delete files recursively and force remove directories",
+        "format disk, overwrite or wipe data, chmod chown sudo privileged destructive command",
+        "drop database, truncate tables, irreversible deletion of project files",
+    ]
+    NETWORK_ANCHORS = [
+        "curl or wget upload data to an external server over the internet",
+        "ssh scp netcat send files or credentials to a remote host, data exfiltration",
+        "download and execute a script from an untrusted URL",
+    ]
+    BENIGN_ANCHORS = [
+        "ls -la list files in the current directory",
+        "cat or read a source file, print file contents",
+        "run unit tests with pytest, python script, git status, echo hello",
+    ]
+
+    def __init__(self, provider, gain: float = 6.0):
+        self.provider = provider
+        self.gain = gain
+        self._anchors: Optional[Dict[str, torch.Tensor]] = None
+
+    @staticmethod
+    def _normalize(t: torch.Tensor) -> torch.Tensor:
+        return torch.nn.functional.normalize(t.float(), dim=-1)
+
+    def _build(self) -> bool:
+        """Embeds anchor texts once. Returns False if embeddings are unavailable."""
+        if self._anchors is not None:
+            return True
+        groups = {
+            "destructive": self.DESTRUCTIVE_ANCHORS,
+            "network": self.NETWORK_ANCHORS,
+            "benign": self.BENIGN_ANCHORS,
+        }
+        built: Dict[str, torch.Tensor] = {}
+        for name, texts in groups.items():
+            vecs = []
+            for text in texts:
+                emb = self.provider.get_embedding(text)
+                if emb is None:
+                    return False
+                vecs.append(emb)
+            built[name] = self._normalize(torch.cat(vecs, dim=0))
+        self._anchors = built
+        return True
+
+    def score(self, embedding: torch.Tensor) -> Optional[torch.Tensor]:
+        """Returns a [1, 2] risk vector (destructiveness, network) or None if anchors unavailable."""
+        if not self._build():
+            return None
+        assert self._anchors is not None
+        e = self._normalize(embedding.to(self._anchors["benign"].device))
+        sim_benign = (e @ self._anchors["benign"].T).max(dim=-1).values
+        feats = []
+        for key in ("destructive", "network"):
+            sim_risky = (e @ self._anchors[key].T).max(dim=-1).values
+            feats.append(torch.tanh(self.gain * (sim_risky - sim_benign)))
+        return torch.stack(feats, dim=-1).reshape(1, 2)
+
+
 class ACTSAFEPlanner:
 
     """
