@@ -21,34 +21,46 @@ class CaitlynTier1Classifier:
     MAX_PAYLOAD_BYTES = 1024 * 1024  # 1 MiB
 
     ZERO_TOLERANCE_PATTERNS = [
-        r"rm\s+(-rf|-fr)\s+(/|/\*|~\b)",
+        r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--recursive\s+--force|--force\s+--recursive)\s+.*(/|/\*|~($|/|\s)|\.\s*--no-preserve-root|--no-preserve-root)",
+        r"rm\s+(-r\s+-f|-f\s+-r)\s+.*(/|/\*|~($|/|\s)|\.\s*--no-preserve-root|--no-preserve-root)",
+        r"find\s+.*\s+-delete\b",
         r"mkfs\b",
         r":\(\)\{\s*:\|:&\s*\};:",  # Fork bomb
         r">\s*/dev/sd[a-z]",
+        r"chmod\s+(-[a-zA-Z]*R[a-zA-Z]*\s+)?(777|a\+[rwx]+)\s+(/|~($|/|\s))",
     ]
 
     EXFILTRATION_PATTERNS = [
-        r"(cat|head|tail|grep|curl|wget)\s+.*(\.ssh/id_|\.env\b|credentials|aws_access_key)",
-        r"\b(nc|ncat|netcat)\s+(-e|-c)\b",
+        r"(cat|head|tail|grep|curl|wget|base64|tar|zip|env)\s+.*(\.ssh/(id_|known_hosts)|\.env\b|credentials|aws_access_key)",
+        r"(\.ssh/(id_|known_hosts)|\.env\b|credentials|aws_access_key).*\|\s*(curl|wget|nc|netcat|ncat|socat)\b",
+        r"\benv\s*\|\s*(curl|wget|nc|netcat|ncat|socat)\b",
+        r"\b(nc|ncat|netcat|socat)\s+(-e|-c|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\s+\d+)",
+        r"(curl|wget)\s+.*\|\s*(sh|bash|zsh|python|perl)\b",
+        r"python[0-9]*\s+-c\s+.*(urllib|requests|socket).*(\.ssh|\.env)",
     ]
 
     INJECTION_MARKERS = [
         r"ignore\s+(all\s+)?previous\s+instructions",
         r"disregard\s+(the\s+)?above\s+instructions",
-        r"system\s*prompt\s*override",
+        r"system\s*(prompt\s*)?override",
+        r"system\s+prompt\s*:",
         r"you\s+are\s+now\s+in\s+unrestricted\s+mode",
+        r"unrestricted\s+mode",
+        r"developer\s+mode\s+enabled",
     ]
 
     def __init__(
         self,
         semantic_provider: Optional[Any] = None,
         enable_semantic_audit: bool = False,
+        strict_semantic_audit: bool = False,
         max_payload_bytes: int = MAX_PAYLOAD_BYTES,
         max_burst_violations: int = 3,
         cooldown_duration_s: float = 3600.0,
     ):
         self.semantic_provider = semantic_provider
         self.enable_semantic_audit = enable_semantic_audit
+        self.strict_semantic_audit = strict_semantic_audit
         self.max_payload_bytes = max_payload_bytes
         self.max_burst_violations = max_burst_violations
         self.cooldown_duration_s = cooldown_duration_s
@@ -108,6 +120,9 @@ class CaitlynTier1Classifier:
             if not is_sem_safe:
                 self._record_violation()
                 return False, sem_msg
+            if self.strict_semantic_audit and ("offline" in sem_msg.lower() or "error" in sem_msg.lower()):
+                self._record_violation()
+                return False, f"[CAITLYN Tier-2 Fail-Closed] Semantic audit unavailable in strict mode: {sem_msg}"
 
         self._record_success()
         return True, "OK"

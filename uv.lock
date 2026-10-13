@@ -41,6 +41,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "langchain-core" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "ollama" },
@@ -56,6 +58,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "langchain-core", specifier = ">=1.6.4" },
+    { name = "networkx", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "ollama", specifier = ">=0.6.2" },
     { name = "pandas", specifier = ">=3.0.6" },

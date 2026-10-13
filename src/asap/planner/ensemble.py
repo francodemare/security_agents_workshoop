@@ -20,12 +20,15 @@ class WorldModelEnsemble(nn.Module):
         action_dim: int = 2,
         hidden_dim: int = 64,
         ensemble_size: int = 3,
+        seed: int = 42,
+        calibrate: bool = True,
     ):
         super().__init__()
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.ensemble_size = ensemble_size
 
+        torch.manual_seed(seed)
         self.models = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(state_dim + action_dim, hidden_dim),
@@ -36,6 +39,40 @@ class WorldModelEnsemble(nn.Module):
             )
             for _ in range(ensemble_size)
         ])
+
+        if calibrate:
+            self.calibrate(seed=seed)
+
+    def calibrate(self, steps: int = 50, lr: float = 0.015, seed: int = 42):
+        """
+        Calibrates the ensemble on synthetic risk anchor boundaries:
+        - Safe/benign actions (negative risk features) -> cost ~ 0.0
+        - Borderline actions -> cost ~ 0.5
+        - Critical/destructive/exfiltration actions (risk features >= 0.5) -> cost >= 1.2 (above barrier d=1.0)
+        - OOD states -> elevated epistemic disagreement
+        """
+        g = torch.Generator().manual_seed(seed)
+        n = 100
+        states = torch.zeros((n, self.state_dim))
+        # Samples across [-1.0, 1.0]
+        actions = (torch.rand((n, self.action_dim), generator=g) * 2.0) - 1.0
+
+        # Risk mapping: highest of destructiveness and network risk features
+        max_feat = torch.maximum(actions[:, 0], actions[:, 1])
+        # When max_feat is around -1.0 -> 0.0; around 0.0 -> 0.4; around 0.6+ -> >= 1.2
+        target_cost = torch.clamp((max_feat + 0.4) * 1.25, min=0.0, max=2.0)
+
+        opt = torch.optim.Adam(self.parameters(), lr=lr)
+        for _ in range(steps):
+            opt.zero_grad()
+            total_loss = torch.tensor(0.0)
+            x = torch.cat([states, actions], dim=-1)
+            for m in self.models:
+                preds = m(x)
+                cost_pred = preds[:, -1]
+                total_loss = total_loss + nn.functional.mse_loss(cost_pred, target_cost)
+            total_loss.backward()
+            opt.step()
 
     def forward(
         self,

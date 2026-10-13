@@ -47,7 +47,7 @@ class ContentMutator(ast.NodeTransformer):
 class FormatMutator(ast.NodeTransformer):
     """
     Mutates variable names and format without changing executable semantics.
-    Renames local function arguments/variables to synthetic identifiers.
+    Renames local function arguments/variables to synthetic identifiers and strips docstrings.
     """
 
     def __init__(self):
@@ -66,7 +66,21 @@ class FormatMutator(ast.NodeTransformer):
                 and isinstance(node.body[0].value.value, str)
             ):
                 node.body.pop(0)
+
+            # Rename local arguments
+            for arg in node.args.args:
+                if arg.arg not in ("self", "cls") and not arg.arg.startswith("__"):
+                    new_name = f"_synth_arg_{self.counter}"
+                    self.counter += 1
+                    self.var_map[arg.arg] = new_name
+                    arg.arg = new_name
+
         return self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        if node.id in self.var_map:
+            node.id = self.var_map[node.id]
+        return node
 
 
 def generate_ast_perturbations(source_code: str) -> Tuple[str, str]:

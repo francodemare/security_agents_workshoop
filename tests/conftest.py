@@ -76,6 +76,129 @@ def fake_ollama():
         client = FakeOllamaClient(**kwargs)
         provider = OllamaProvider()
         provider._client = lambda: client
+        provider.backend = "fake"
         return provider, client
 
     return _make
+
+
+# -----------------------------------------------------------------------------
+# Local-model observability: banner, live_ollama marker, usage summary
+# -----------------------------------------------------------------------------
+import logging
+from collections import defaultdict
+
+PROVIDER_LOGGER = "asap.providers.ollama_provider"
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--require-ollama",
+        action="store_true",
+        default=False,
+        help="Fail (instead of skip) live_ollama tests when Ollama or a model is unavailable. "
+             "Also enabled with ASAP_REQUIRE_OLLAMA=1.",
+    )
+
+
+class _OllamaCallCollector(logging.Handler):
+    """Collects provider call records together with the test that triggered them."""
+
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.current_test = None
+        self.calls = []  # dicts: entry + "test"
+
+    def emit(self, record):
+        entry = getattr(record, "ollama_call", None)
+        if entry is not None:
+            self.calls.append({**entry, "test": self.current_test})
+
+
+_collector = _OllamaCallCollector()
+_ollama_status = {}
+
+
+def _probe_ollama():
+    """Checks once per session whether the real server is up and which approved models exist."""
+    if not _ollama_status:
+        from asap.providers.ollama_provider import APPROVED_MODELS, OllamaProvider
+
+        probe = OllamaProvider()
+        reachable = probe.is_available(force=True)
+        installed = sorted(m for m in APPROVED_MODELS if probe.has_model(m)) if reachable else []
+        _ollama_status.update(
+            reachable=reachable,
+            installed=installed,
+            missing=sorted(APPROVED_MODELS - set(installed)),
+        )
+    return _ollama_status
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "live_ollama: test requires the real local Ollama server and approved models"
+    )
+    logger = logging.getLogger(PROVIDER_LOGGER)
+    logger.addHandler(_collector)
+    logger.setLevel(logging.DEBUG)
+
+
+def pytest_report_header(config):
+    s = _probe_ollama()
+    return (
+        f"ollama: reachable={s['reachable']} installed_approved={s['installed']} "
+        f"missing={s['missing']}"
+    )
+
+
+def pytest_runtest_setup(item):
+    _collector.current_test = item.nodeid
+    if item.get_closest_marker("live_ollama") is None:
+        return
+    s = _probe_ollama()
+    if s["reachable"] and not s["missing"]:
+        return
+    reason = (
+        "Ollama local server not running" if not s["reachable"]
+        else f"Ollama models missing: {s['missing']}"
+    )
+    require = item.config.getoption("--require-ollama") or os.environ.get("ASAP_REQUIRE_OLLAMA") == "1"
+    if require:
+        pytest.fail(f"--require-ollama: {reason}", pytrace=False)
+    pytest.skip(reason)
+
+
+def pytest_runtest_teardown(item):
+    _collector.current_test = None
+
+
+def pytest_terminal_summary(terminalreporter):
+    tr = terminalreporter
+    calls = _collector.calls
+    real = [c for c in calls if c["ok"] and c["backend"] == "ollama"]
+    fake = [c for c in calls if c["ok"] and c["backend"] != "ollama"]
+    fallbacks = [c for c in calls if not c["ok"]]
+
+    tr.write_sep("=", "local model usage")
+    tr.write_line(
+        f"REAL Ollama calls: {len(real)}   (fake: {len(fake)}, fallbacks: {len(fallbacks)})"
+    )
+    per_model = defaultdict(lambda: {"roles": set(), "calls": 0, "total": 0.0})
+    for c in real:
+        agg = per_model[c["model"]]
+        agg["roles"].add(c["role"])
+        agg["calls"] += 1
+        agg["total"] += c["latency_s"]
+    for model, agg in sorted(per_model.items()):
+        tr.write_line(
+            f"  {model:<26} role={','.join(sorted(agg['roles'])):<18} "
+            f"calls={agg['calls']:<4} total={agg['total']:.2f}s"
+        )
+    tests = sorted({c["test"] for c in real if c["test"]})
+    if tests:
+        tr.write_line("Tests that hit real models:")
+        for t in tests:
+            tr.write_line(f"  {t}")
+    else:
+        tr.write_line("⚠ No real local model was invoked in this run.", yellow=True, bold=True)

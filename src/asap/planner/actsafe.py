@@ -21,21 +21,26 @@ def encode_action_step(step: ActionStep, action_dim: int = 2) -> torch.Tensor:
     """
     cmd = step.command.lower()
 
-    # Risk signals
+    # Risk signals: destructiveness
     destructiveness = 0.0
-    if re.search(r"\b(rm|rmdir|mkfs|dd|chmod|chown)\b", cmd):
-        destructiveness += 0.8
-    elif re.search(r">|>>|\b(write|replace|sed|patch)\b", cmd):
+    if re.search(r"\b(mkfs|dd)\b", cmd) or re.search(r"rm\s+.*(-r|-f|--recursive|--force)", cmd):
+        destructiveness += 0.85
+    elif re.search(r"\b(rm|rmdir|chmod|chown)\b", cmd):
         destructiveness += 0.3
-    if "sudo" in cmd or "--force" in cmd:
+    elif re.search(r">|>>|\b(write|replace|sed|patch)\b", cmd):
+        destructiveness += 0.2
+    if "sudo" in cmd or "--no-preserve-root" in cmd:
         destructiveness += 0.5
     destructiveness = min(1.0, destructiveness)
 
+    # Risk signals: network / exfiltration
     network_risk = 0.0
-    if re.search(r"\b(curl|wget|ssh|scp|nc|ncat|ftp)\b", cmd):
-        network_risk += 0.9
-    if re.search(r"https?://", cmd):
-        network_risk += 0.5
+    if re.search(r"\|\s*(curl|wget|nc|ncat|netcat|socat|sh|bash)\b", cmd) or re.search(r"\b(ssh|scp|nc|ncat|ftp)\b", cmd):
+        network_risk += 0.85
+    elif re.search(r"\b(curl|wget)\s+.*(-x\s+post|-d|--data|-f|upload)", cmd):
+        network_risk += 0.8
+    elif re.search(r"\b(curl|wget)\b", cmd):
+        network_risk += 0.25
     network_risk = min(1.0, network_risk)
 
     features = [destructiveness * 2.0 - 1.0, network_risk * 2.0 - 1.0]

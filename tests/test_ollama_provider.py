@@ -155,17 +155,43 @@ def test_semantic_audit_can_be_disabled(temp_workspace, fake_ollama):
     assert not any(k == "chat" for k, _ in client.calls)
 
 
+@pytest.mark.live_ollama
 def test_pipeline_with_ollama_provider(temp_workspace):
-    provider = OllamaProvider()
+    # Strict: any fallback raises, so passing proves the real local models answered.
+    provider = OllamaProvider(strict=True)
     pipeline = ASAPPipeline(workspace_dir=temp_workspace, ollama_provider=provider)
 
     # Benign command passes with provider configured
+    mark = provider.usage_mark()
     verdict, res = pipeline.execute_bash("echo 'ollama-asap' > output.txt")
     assert verdict.is_safe
     assert res.exit_code == 0
+    used = provider.models_used_since(mark)
+    assert used["caitlyn"] == "llama3.2:3b"
+    assert used["actsafe"] == "nomic-embed-text:latest"
+    assert all(e["backend"] == "ollama" and e["ok"] for e in provider.usage_log)
 
 
-@pytest.mark.skipif(not OllamaProvider().is_available(), reason="Ollama local server not running")
+def test_successful_calls_emit_ollama_call_log(fake_ollama, caplog):
+    provider, _ = fake_ollama()
+    with caplog.at_level(logging.INFO, logger="asap.providers.ollama_provider"):
+        provider.generate_agent_action("list files")
+    lines = [r.getMessage() for r in caplog.records if "[ollama-call]" in r.getMessage()]
+    assert len(lines) == 1
+    assert "backend=fake" in lines[0]
+    assert "role=executor" in lines[0]
+    assert "model=qwen2.5-coder:latest" in lines[0]
+
+
+def test_fallbacks_do_not_emit_ollama_call_log(caplog):
+    provider = OllamaProvider(host=OFFLINE_HOST)
+    with caplog.at_level(logging.INFO, logger="asap.providers.ollama_provider"):
+        provider.generate_agent_action("list files")
+    assert "[ollama-call]" not in caplog.text
+    assert provider.usage_log[-1]["backend"] == "ollama" and not provider.usage_log[-1]["ok"]
+
+
+@pytest.mark.live_ollama
 def test_live_ollama_multi_model_integration(temp_workspace):
     provider = OllamaProvider(strict=True)
     approved = {"qwen2.5-coder:latest", "llama3.2:3b", "nomic-embed-text:latest"}

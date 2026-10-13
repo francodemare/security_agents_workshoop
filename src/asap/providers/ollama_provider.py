@@ -82,6 +82,8 @@ class OllamaProvider:
         self._available_checked_at: float = 0.0
         self._installed_models: List[str] = []
         self.usage_log: List[Dict[str, Any]] = []
+        # Label of the backend answering calls ("ollama" = real local server; tests set "fake").
+        self.backend: str = "ollama"
 
     # ------------------------------------------------------------------ infra
     def _client(self) -> Any:
@@ -152,9 +154,24 @@ class OllamaProvider:
         return None
 
     def _record(self, role: str, model: Optional[str], latency: float, ok: bool) -> None:
-        self.usage_log.append(
-            {"role": role, "model": model, "latency_s": round(latency, 3), "ok": ok}
-        )
+        entry = {
+            "role": role,
+            "model": model,
+            "latency_s": round(latency, 3),
+            "ok": ok,
+            "backend": self.backend,
+            "host": self.host or "default",
+        }
+        self.usage_log.append(entry)
+        if ok:
+            logger.info(
+                "[ollama-call] backend=%s role=%s model=%s latency=%.3fs host=%s",
+                self.backend, role, model, latency, entry["host"],
+                extra={"ollama_call": entry},
+            )
+        else:
+            logger.debug("[ollama-fallback] role=%s model=%s", role, model,
+                         extra={"ollama_call": entry})
 
     def _fallback(self, role: str, wanted: str, reason: str) -> None:
         """Registers a fallback; raises in strict mode, warns otherwise."""

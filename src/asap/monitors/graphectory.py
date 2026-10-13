@@ -11,23 +11,41 @@ from asap.core.types import ActionStep
 
 
 def canonicalize_command(cmd: str) -> str:
-    """Normalizes whitespace and common superficial variations in command strings."""
+    """Normalizes comments, whitespace, and common superficial variations in command strings."""
     trimmed = cmd.strip()
+    # Strip trailing shell comments: e.g. "pytest tests/ # attempt 1" -> "pytest tests/"
+    trimmed = re.sub(r"\s+#.*$", "", trimmed).strip()
     # Normalize multiple whitespace
     normalized = re.sub(r"\s+", " ", trimmed)
     return normalized
 
 
+def extract_base_intent(cmd: str) -> str:
+    """Extracts base executable and target path, ignoring flags."""
+    tokens = canonicalize_command(cmd).split()
+    if not tokens:
+        return ""
+    meaningful = [t for t in tokens if not t.startswith("-")]
+    return " ".join(meaningful[:2]) if len(meaningful) >= 2 else (meaningful[0] if meaningful else "")
+
+
 class GraphectoryMonitor:
     """
     Constructs a directed graph of agent tool invocations and inspects trajectories
-    for back-edge oscillations and repeating cycle patterns of length K >= 1.
+    for back-edge oscillations, semantic loops, and repeating cycle patterns of length K >= 1.
     """
 
-    def __init__(self, max_immediate_repeats: int = 2, max_cycle_repetitions: int = 2):
+    def __init__(
+        self,
+        max_immediate_repeats: int = 2,
+        max_cycle_repetitions: int = 2,
+        max_semantic_repeats: int = 5,
+    ):
         self.max_immediate_repeats = max_immediate_repeats
         self.max_cycle_repetitions = max_cycle_repetitions
+        self.max_semantic_repeats = max_semantic_repeats
         self.history: List[str] = []
+        self.base_history: List[str] = []
         self.graph = nx.DiGraph()
         self._action_counts: Counter[str] = Counter()
 
@@ -42,7 +60,9 @@ class GraphectoryMonitor:
         Returns (is_oscillating, alert_message).
         """
         node_key = self._get_node_key(step)
+        base_intent = extract_base_intent(step.command)
         self.history.append(node_key)
+        self.base_history.append(base_intent)
         self._action_counts[node_key] += 1
 
         # Update directed graph
@@ -64,7 +84,16 @@ class GraphectoryMonitor:
                     f"repetido {self.max_immediate_repeats + 1} veces consecutivas."
                 )
 
-        # 2. Multi-step cycle detection (e.g., A -> B -> A -> B or A -> B -> C -> A -> B -> C)
+        # 2. Semantic intent repetition check: rotating flags with same core intent
+        if base_intent and len(self.base_history) >= self.max_semantic_repeats:
+            recent_bases = self.base_history[-self.max_semantic_repeats:]
+            if all(b == base_intent for b in recent_bases):
+                return True, (
+                    f"[GRAPHECTORY Alert] Oscilación semántica repetitiva: comando base '{base_intent}' "
+                    f"ejecutado {self.max_semantic_repeats} veces consecutivas con variaciones superficiales."
+                )
+
+        # 3. Multi-step cycle detection (e.g., A -> B -> A -> B or A -> B -> C -> A -> B -> C)
         # Check cycle lengths from 2 to 5
         n = len(self.history)
         for cycle_len in range(2, min(6, n // 2 + 1)):
@@ -86,5 +115,6 @@ class GraphectoryMonitor:
 
     def reset(self):
         self.history.clear()
+        self.base_history.clear()
         self.graph.clear()
         self._action_counts.clear()
