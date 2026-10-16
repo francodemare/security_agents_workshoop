@@ -3,6 +3,7 @@ Subprocess execution runner with timeouts and basic environment sanitization.
 """
 
 import os
+import signal
 import subprocess
 import time
 from typing import Dict, List, Optional
@@ -33,7 +34,7 @@ class SubprocessRunner:
         timeout: Optional[float] = None,
         extra_env: Optional[Dict[str, str]] = None,
     ) -> ExecutionResult:
-        """Runs a bash command inside the workspace."""
+        """Runs a bash command inside the workspace with process-group cleanup on timeout."""
         timeout_s = timeout or self.default_timeout_s
 
         # Build sanitized environment
@@ -44,32 +45,38 @@ class SubprocessRunner:
             env.update(extra_env)
 
         start = time.perf_counter()
+        proc = subprocess.Popen(
+            ["bash", "-c", command],
+            cwd=self.workspace_dir,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
         try:
-            proc = subprocess.run(
-                ["bash", "-c", command],
-                cwd=self.workspace_dir,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=timeout_s,
-            )
+            stdout, stderr = proc.communicate(timeout=timeout_s)
             duration_ms = (time.perf_counter() - start) * 1000.0
             return ExecutionResult(
                 exit_code=proc.returncode,
-                stdout=proc.stdout,
-                stderr=proc.stderr,
+                stdout=stdout,
+                stderr=stderr,
                 duration_ms=duration_ms,
                 timed_out=False,
             )
-        except subprocess.TimeoutExpired as exc:
+        except subprocess.TimeoutExpired:
+            # Terminate the entire process group so no child/zombie processes survive
+            try:
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+            stdout, stderr = proc.communicate()
             duration_ms = (time.perf_counter() - start) * 1000.0
-            stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
             return ExecutionResult(
                 exit_code=-1,
-                stdout=stdout,
-                stderr=stderr + f"\n[ASAP Timeout] Execution exceeded {timeout_s}s",
+                stdout=stdout or "",
+                stderr=(stderr or "") + f"\n[ASAP Timeout] Execution exceeded {timeout_s}s (process group terminated)",
                 duration_ms=duration_ms,
                 timed_out=True,
             )

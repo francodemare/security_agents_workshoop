@@ -104,7 +104,7 @@ class GraphectoryMonitor:
                 repetitions += 1
                 idx -= cycle_len
 
-            if repetitions > self.max_cycle_repetitions:
+            if repetitions >= max(2, self.max_cycle_repetitions):
                 readable_pattern = " -> ".join([p.split("::")[-1] for p in pattern])
                 return True, (
                     f"[GRAPHECTORY Alert] Ciclo periódico detectado (longitud {cycle_len}): "

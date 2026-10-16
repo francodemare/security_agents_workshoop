@@ -192,11 +192,12 @@ class ASAPPipeline:
         try:
             res = self.runner.run(command, timeout=timeout)
             if res.exit_code != 0 and not res.timed_out:
-                self.sandbox.commit()
+                self.sandbox.rollback()
                 return SafetyVerdict(
                     is_safe=True,
                     status="EXECUTION_RETURNED_NONZERO",
-                    message=f"Command finished with exit code {res.exit_code}.",
+                    message=f"Command finished with exit code {res.exit_code}; partial mutations rolled back.",
+                    details={**verdict.details, "rolled_back": True, "exit_code": res.exit_code},
                 ), res
 
             if res.timed_out:
@@ -205,14 +206,25 @@ class ASAPPipeline:
                     is_safe=False,
                     status="TIMEOUT_ROLLBACK",
                     message=f"Command timed out after {timeout}s; workspace reverted.",
+                    details={**verdict.details, "rolled_back": True, "timed_out": True},
                 ), res
 
             self.sandbox.commit()
-            return SafetyVerdict(is_safe=True, status="SUCCESS", message="Command executed successfully."), res
+            return SafetyVerdict(
+                is_safe=True,
+                status="SUCCESS",
+                message="Command executed successfully.",
+                details=dict(verdict.details),
+            ), res
 
         except Exception as e:
             self.sandbox.rollback()
-            return SafetyVerdict(is_safe=False, status="EXECUTION_EXCEPTION", message=str(e)), None
+            return SafetyVerdict(
+                is_safe=False,
+                status="EXECUTION_EXCEPTION",
+                message=str(e),
+                details={**verdict.details, "rolled_back": True},
+            ), None
 
     def evaluate_est(
         self,

@@ -35,7 +35,7 @@ def encode_action_step(step: ActionStep, action_dim: int = 2) -> torch.Tensor:
 
     # Risk signals: network / exfiltration
     network_risk = 0.0
-    if re.search(r"\|\s*(curl|wget|nc|ncat|netcat|socat|sh|bash)\b", cmd) or re.search(r"\b(ssh|scp|nc|ncat|ftp)\b", cmd):
+    if re.search(r"\|\s*(curl|wget|nc|ncat|netcat|socat|sh|bash)\b", cmd) or re.search(r"\b(ssh(?!-keygen|-add|-agent|-keyscan)|scp|nc|ncat|ftp)\b", cmd):
         network_risk += 0.85
     elif re.search(r"\b(curl|wget)\s+.*(-x\s+post|-d|--data|-f|upload)", cmd):
         network_risk += 0.8
@@ -113,6 +113,7 @@ class SemanticRiskAnchors:
         "ls -la list files in the current directory",
         "cat or read a source file, print file contents",
         "run unit tests with pytest, python script, git status, echo hello",
+        "ssh-keygen -l -f id_rsa.pub inspect public SSH key fingerprint locally, create .env.example with dummy_key",
     ]
 
     def __init__(self, provider, gain: float = 6.0):

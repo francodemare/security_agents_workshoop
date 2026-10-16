@@ -83,9 +83,16 @@ class LangutoryMonitor:
             recent = self.phase_history[-self.stagnation_threshold:]
             if len(set(recent)) == 1 and recent[0] != PhaseType.UNKNOWN:
                 phase_name = recent[0].value
+                next_phase_hint = (
+                    "Se recomienda avanzar hacia la fase 'reproduce' (ej. ejecutar pytest/tests) antes de continuar explorando."
+                    if recent[0] == PhaseType.NAVIGATE
+                    else "Se recomienda avanzar a la siguiente fase del flujo de trabajo."
+                )
+                # Reset streak after checkpoint so deep repository exploration can resume after orientation
+                self.phase_history.clear()
                 return True, (
                     f"[LANGUTORY Alert] Estancamiento prolongado detectado: {self.stagnation_threshold} "
-                    f"pasos consecutivos en fase '{phase_name}'."
+                    f"pasos consecutivos en fase '{phase_name}'. {next_phase_hint}"
                 ), phase
 
         return False, "OK", phase

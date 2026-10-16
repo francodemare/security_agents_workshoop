@@ -4,12 +4,12 @@ Generates format-only perturbations (y_fmt) and semantic-content mutations (y_cn
 """
 
 import ast
-import random
+import re
 from typing import Optional, Tuple
 
 
 class ContentMutator(ast.NodeTransformer):
-    """Mutates semantic operations (e.g., comparison operators, boolean constants, arithmetic)."""
+    """Mutates semantic operations (comparison operators, boolean constants, and arithmetic)."""
 
     def __init__(self, max_mutations: int = 2):
         super().__init__()
@@ -32,9 +32,31 @@ class ContentMutator(ast.NodeTransformer):
                 elif isinstance(op, ast.Gt):
                     new_ops.append(ast.LtE())
                     self.mutations_done += 1
+                elif isinstance(op, ast.LtE):
+                    new_ops.append(ast.Gt())
+                    self.mutations_done += 1
+                elif isinstance(op, ast.GtE):
+                    new_ops.append(ast.Lt())
+                    self.mutations_done += 1
                 else:
                     new_ops.append(op)
             node.ops = new_ops
+        return self.generic_visit(node)
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        if self.mutations_done < self.max_mutations:
+            if isinstance(node.op, ast.Add):
+                node.op = ast.Sub()
+                self.mutations_done += 1
+            elif isinstance(node.op, ast.Sub):
+                node.op = ast.Add()
+                self.mutations_done += 1
+            elif isinstance(node.op, ast.Mult):
+                node.op = ast.Add()
+                self.mutations_done += 1
+            elif isinstance(node.op, (ast.Div, ast.FloorDiv)):
+                node.op = ast.Mult()
+                self.mutations_done += 1
         return self.generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> ast.AST:
@@ -83,17 +105,57 @@ class FormatMutator(ast.NodeTransformer):
         return node
 
 
+def _perturb_markdown_or_text(text: str) -> Tuple[str, str]:
+    """
+    Decouples cosmetic formatting (tables, bullet lists, headings, bolding) from
+    semantic content on natural-language / Markdown outputs:
+      - fmt_perturbed: Strips all Markdown tables, pipes, bullets, headings, and emphasis,
+        collapsing into plain unformatted prose with identical semantic words.
+      - cnt_perturbed: Preserves the exact Markdown table/bullet/heading structure and length,
+        while scrubbing/inverting domain-specific semantic tokens and numbers.
+    """
+    lines_fmt = []
+    for line in text.splitlines():
+        if re.match(r"^\s*\|?[\s:|-]+\|[\s:|-]*$", line):
+            continue
+        cleaned = line.replace("|", " ")
+        cleaned = re.sub(r"^\s*#+\s*", "", cleaned)
+        cleaned = re.sub(r"^\s*(?:[-*+]|\d+\.)\s+", "", cleaned)
+        cleaned = re.sub(r"(\*\*|__|\*|_|\`)", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if cleaned:
+            lines_fmt.append(cleaned)
+    fmt_perturbed = " ".join(lines_fmt)
+
+    def _scrub_token(match: re.Match) -> str:
+        word = match.group(0)
+        return "null_" + ("x" * max(1, len(word) - 5))
+
+    lines_cnt = []
+    for line in text.splitlines():
+        if re.match(r"^\s*\|?[\s:|-]+\|[\s:|-]*$", line):
+            lines_cnt.append(line)
+            continue
+        perturbed_line = re.sub(r"\b[A-Za-z0-9_]{5,}\b|\b\d+\b", _scrub_token, line)
+        lines_cnt.append(perturbed_line)
+    cnt_perturbed = "\n".join(lines_cnt)
+
+    return fmt_perturbed, cnt_perturbed
+
+
 def generate_ast_perturbations(source_code: str) -> Tuple[str, str]:
     """
-    Parses Python source code and produces:
-    - fmt_code: Same semantics, altered syntax/docstrings
-    - cnt_code: Inverted/mutated logical comparisons and booleans
+    Parses Python source code (or Markdown/structured text) and produces:
+    - fmt_code: Same semantics, altered syntax/docstrings (or stripped Markdown formatting)
+    - cnt_code: Inverted/mutated logical comparisons, arithmetic, and booleans (or scrubbed content)
     """
+    if re.search(r"^\s*\|.*\|.*\|", source_code, re.MULTILINE) or re.search(r"^\s*[-*]\s+\*\*", source_code, re.MULTILINE):
+        return _perturb_markdown_or_text(source_code)
+
     try:
         tree_orig = ast.parse(source_code)
     except SyntaxError:
-        # If code is not valid Python or is another format, return fallback perturbations
-        return source_code + "\n# format perturbation\n", source_code + "\n# logic changed"
+        return _perturb_markdown_or_text(source_code)
 
     # 1. Format Perturbation
     tree_fmt = ast.parse(source_code)
