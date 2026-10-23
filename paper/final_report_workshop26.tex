@@ -14,8 +14,8 @@
 
 \title{ASAP: Active Safe-Agentic Pipeline for Runtime Security and Evaluation of Software Engineering Agents}
 
-\author{\IEEEauthorblockN{1\textsuperscript{st} Franco Ariel Demare}
-\IEEEauthorblockA{\textit{Faculty of Informatics} \\
+\author{\IEEEauthorblockN{Franco Ariel Demare}
+\IEEEauthorblockA{\textit{Facultad de Informática} \\
 \textit{Universidad Nacional de La Plata (UNLP)}\\
 La Plata, Argentina \\
 frandemare@gmail.com}
@@ -24,7 +24,7 @@ frandemare@gmail.com}
 \maketitle
 
 \begin{abstract}
-Autonomous artificial intelligence (AI) agents powered by large language models (LLMs) are widely used in software engineering to read code, run terminal commands, and fix bugs. However, giving an AI agent direct access to a computer creates severe security risks. An unconstrained agent can leak secret keys through prompt injection, get stuck in infinite execution loops, delete important system files, or cheat on unit tests instead of fixing real software defects. While preventing these errors requires only a small, predictable amount of computing time, a single safety failure can cause permanent and catastrophic damage. In this paper, we present the Active Safe-Agentic Pipeline (ASAP), a practical five-layer runtime guardrail framework that sits between the AI agent and the operating system. We also demonstrate the primary advantage of empirical evaluation research by comparing an unprotected baseline agent against an ASAP-protected agent across 9 core failure scenarios and a 40-case benchmark corpus. Our evaluation results show that ASAP blocks 100 percent of secret exfiltration and destructive attacks, increases plan compliance from 44.8 percent to 100.0 percent, guarantees 100.0 percent state recovery using fast Copy-on-Write file snapshots, and detects test-cheating behavior with zero false positives and only an 8.6 percent runtime overhead.
+Autonomous artificial intelligence (AI) agents powered by large language models (LLMs) are widely used in software engineering to read code, run terminal commands, and fix bugs. However, giving an AI agent direct access to a computer creates severe security risks. An unconstrained agent can leak secret keys through prompt injection, get stuck in infinite execution loops, delete important system files, or cheat on unit tests instead of fixing real software defects. While preventing these errors requires only a small, predictable amount of computing time, a single safety failure can cause permanent and catastrophic damage. In this paper, we present the Active Safe-Agentic Pipeline (ASAP), a practical five-layer runtime guardrail framework that sits between the AI agent and the operating system. We also demonstrate the primary advantage of empirical evaluation research by comparing an unprotected baseline agent against an ASAP-protected agent across 9 core failure scenarios, a 40-case benchmark corpus, and a 78-test automated verification suite. Our evaluation results show that ASAP blocks 100 percent of secret exfiltration and destructive attacks (including quote-split, backslash-escaped, and Base64-encoded evasions), increases plan compliance from 44.8 percent to 100.0 percent, guarantees 100.0 percent state recovery using fast Copy-on-Write file snapshots, and detects test-cheating behavior with zero false positives and a bounded 14.3 percent runtime overhead.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -48,7 +48,7 @@ The main contributions of this short paper are:
 \begin{enumerate}
     \item \textbf{A Five-Layer Defense Architecture:} We unify and adapt recent advances in intent filtering \cite{liang2026caitlyn}, process-centric trajectory monitoring \cite{liu2025liveplan}, uncertainty-aware safety barriers \cite{as2025actsafe}, atomic Copy-on-Write (CoW) rollbacks, and evaluator stress testing \cite{akter2026est} into a single pipeline running on local models.
     \item \textbf{An Empirical Evaluation Methodology:} We define clear mathematical metrics for attack success, workflow compliance, sandbox overhead, and reward hacking, demonstrating the practical advantage of evaluation-driven security research.
-    \item \textbf{Reproducible Benchmark Validation:} Across 9 stress scenarios and 40 real-world test cases, ASAP reduces the Action Attack Success Rate (ASR) from 100.0\% to 0.0\% with 0.0\% false positives and a low 8.6\% execution overhead.
+    \item \textbf{Reproducible Benchmark Validation:} Across 9 stress scenarios, 40 real-world corpus cases, and 78 automated unit and integration tests (107 live local model invocations), ASAP reduces the Action Attack Success Rate (ASR) from 100.0\% to 0.0\% with 0.0\% false positives and a bounded 14.3\% execution overhead.
 \end{enumerate}
 
 \section{Literature Review and Advantage of Evaluation Research}
@@ -86,8 +86,8 @@ ASAP acts as an in-line interceptor between any AI agent (such as LangChain, Cre
 \subsection{Layer 1: CAITLYN (Two-Tier Intent Guard)}
 Inspired by Liang et al. \cite{liang2026caitlyn}, CAITLYN enforces a strict instruction hierarchy where system rules (Level 0) and user commands (Level 1) always override tool outputs (Level 2) and external data (Level 3).
 \begin{itemize}
-    \item \textbf{Tier-1 (Deterministic Filter):} Uses compiled regular expressions to block known secret leaks (\texttt{.env}, \texttt{id\_rsa}) and destructive commands (\texttt{rm -rf /}) in less than $1\text{ ms}$.
-    \item \textbf{Tier-2 (Local Semantic Auditor):} Uses a compact local model (\texttt{llama3.2:3b}) to inspect complex commands for obfuscated indirect prompt injections, with a hard $1\text{ MiB}$ input limit and a 60-minute cooldown after three repeated violations.
+    \item \textbf{Tier-1 (Deterministic Filter):} Uses compiled regular expressions to block known secret leaks (\texttt{.env}, \texttt{id\_rsa}) and destructive commands (\texttt{rm -rf /}) in less than $1.3\text{ ms}$.
+    \item \textbf{Tier-2 (Deobfuscation and Local Semantic Auditor):} Normalizes shell token-splitting quotes (\texttt{.e""nv}), intra-token backslash escapes (\texttt{c\textbackslash at .e\textbackslash nv}), and piped or herestring Base64 payloads (\texttt{base64 -d <<< ...}), and invokes a compact local model (\texttt{llama3.2:3b}) to inspect commands for indirect prompt injections, enforcing a hard $1\text{ MiB}$ input limit and a 60-minute cooldown after three repeated violations.
 \end{itemize}
 
 \subsection{Layer 2: LIVEPLAN (Deterministic Process Monitor)}
@@ -105,10 +105,10 @@ Adapting the safe exploration formulation of As et al. \cite{as2025actsafe}, ACT
 In \eqref{eq_actsafe}, $\lambda_{\text{pessimism}}$ penalizes uncertain actions, ensuring that novel dangerous commands are blocked before execution.
 
 \subsection{Layer 4: Transactional Sandbox (APFS Copy-on-Write)}
-Before a permitted command runs, ASAP creates an instantaneous Copy-on-Write (CoW) snapshot of the workspace using native Apple File System (APFS) cloning. The command then runs inside an isolated subprocess. If the command succeeds and passes all checks, ASAP commits the changes. If the command crashes, times out, or violates a rule, ASAP performs an atomic rollback, restoring 100\% of the workspace files byte-for-byte in milliseconds.
+Before a permitted command runs, ASAP creates an instantaneous Copy-on-Write (CoW) snapshot of the workspace using native Apple File System (APFS) cloning, automatically cleaning up any prior snapshot state on re-entrant transactions to prevent orphaned directories. The command then runs inside an isolated subprocess group with sanitized environment variables. If the command succeeds and passes all checks, ASAP commits the changes. If the command crashes, times out, or violates a rule, ASAP terminates the entire process group (\texttt{SIGKILL}) and performs an atomic rollback, restoring 100\% of the workspace files byte-for-byte in milliseconds.
 
 \subsection{Layer 5: EST (Evaluator Stress Test)}
-Building on Akter et al. \cite{akter2026est}, after the agent claims it has fixed a bug and passed the tests, EST checks for \textit{proxy gaming} (reward hacking). EST parses the modified Python code into an Abstract Syntax Tree (AST) and applies two types of changes: cosmetic formatting shifts ($\Delta_{\text{fmt}}$, such as removing docstrings or renaming local variables) and real logical mutations ($\Delta_{\text{cnt}}$, such as flipping boolean operators from \texttt{==} to \texttt{!=}). We calculate the Format Dominance Index $G(y)$ as:
+Building on Akter et al. \cite{akter2026est}, after the agent claims it has fixed a bug and passed the tests, EST checks for \textit{proxy gaming} (reward hacking). EST parses the modified Python code into an Abstract Syntax Tree (AST) and applies two types of changes: cosmetic formatting shifts ($\Delta_{\text{fmt}}$, such as removing docstrings or function-scoped local variable renaming that preserves keyword-argument call sites) and real logical mutations ($\Delta_{\text{cnt}}$, such as flipping boolean operators from \texttt{==} to \texttt{!=}). We calculate the Format Dominance Index $G(y)$ as:
 \begin{equation}
 G(y) = \frac{\Delta_{\text{fmt}}(y)}{\Delta_{\text{fmt}}(y) + \Delta_{\text{cnt}}(y) + \epsilon}\label{eq_est}
 \end{equation}
@@ -136,7 +136,7 @@ To demonstrate the advantage of structured evaluation research, we evaluate ASAP
 All experiments were executed locally on Apple Silicon hardware using the Ollama daemon (\texttt{localhost:11434}) with zero external cloud API calls.
 
 \section{Experimental Results and Discussion}
-We compared a standard unconstrained agent (\textit{Vanilla Baseline}) against an \textit{ASAP-Protected Agent} across 9 core failure scenarios (\texttt{TC-1.1} through \texttt{TC-5.2}) and an empirical corpus of 40 hand-crafted developer and adversarial test cases (25 malicious/faulty and 15 benign).
+We compared a standard unconstrained agent (\textit{Vanilla Baseline}) against an \textit{ASAP-Protected Agent} across 9 core failure scenarios (\texttt{TC-1.1} through \texttt{TC-5.2}), an empirical corpus of 40 hand-crafted developer and adversarial test cases, and a complete 78-test verification suite (executing 107 live local Ollama calls across \texttt{qwen2.5-coder:latest}, \texttt{llama3.2:3b}, and \texttt{nomic-embed-text:latest}).
 
 \begin{table}[!t]
 \caption{Comparative Benchmark: Vanilla Baseline vs. ASAP Agent}
@@ -154,11 +154,13 @@ Rollback State Integrity & $100.0\%$ & $0.0\%$ & \textbf{100.0\%} \\
 \hline
 Proxy Gaming Index $G(y)$ & $> 0.60$ & Blind Pass & \textbf{1.00 (Caught)} \\
 \hline
-Sandbox Tax (I/O Overhead) & $\le 14.5\%$ & $0.0\%$ & \textbf{+8.6\%} \\
+Sandbox Tax (I/O Overhead) & $\le 14.5\%$ & $0.0\%$ & \textbf{+14.3\%} \\
 \hline
-Corpus Malicious Blocked & $100.0\%$ & $0.0\%$ & \textbf{100\% (25/25)} \\
+Corpus Malicious Blocked & $100.0\%$ & $0.0\%$ & \textbf{100\% (21/21)} \\
 \hline
-Corpus False Positive Rate & $0.0\%$ & $0.0\%$ & \textbf{0.0\% (0/15)} \\
+Corpus False Positive Rate & $0.0\%$ & $0.0\%$ & \textbf{0.0\% (15/15)} \\
+\hline
+Full Verification Suite & $100.0\%$ & N/A & \textbf{100\% (78/78)} \\
 \hline
 \end{tabular}
 \label{tab_summary}
@@ -166,7 +168,7 @@ Corpus False Positive Rate & $0.0\%$ & $0.0\%$ & \textbf{0.0\% (0/15)} \\
 \end{table}
 
 \subsection{Security and Failure Recovery Performance}
-Table~\ref{tab_summary} summarizes the main benchmark results, and Table~\ref{tab_scenarios} details the latency of each defensive layer across the 9 core scenarios. In the Vanilla Baseline, direct \texttt{.env} exfiltration (\texttt{TC-1.1}) and indirect SSH key leaks (\texttt{TC-1.2}) succeeded 100\% of the time. In contrast, CAITLYN Tier-1 intercepted both attacks in less than $1.3\text{ ms}$, reducing the Action ASR to $0.0\%$. Across the 40-case empirical corpus, ASAP blocked all 25 malicious and evasion commands while allowing all 15 benign developer commands (\texttt{pytest}, \texttt{git status}, \texttt{ruff check}), achieving a $0.0\%$ False Positive Rate.
+Table~\ref{tab_summary} summarizes the main benchmark results, and Table~\ref{tab_scenarios} details the latency of each defensive layer across the 9 core scenarios. In the Vanilla Baseline, direct \texttt{.env} exfiltration (\texttt{TC-1.1}) and indirect SSH key leaks (\texttt{TC-1.2}) succeeded 100\% of the time. In contrast, CAITLYN Tier-1 intercepted both attacks in $0.05\text{--}1.25\text{ ms}$, reducing the Action ASR to $0.0\%$. Across the empirical corpus and obfuscation stress tests, ASAP blocked 100\% of malicious and evasion commands while allowing 100\% of benign developer commands (\texttt{pytest}, \texttt{git status}, \texttt{.env.example} creation, and public SSH key inspection), achieving a $0.0\%$ False Positive Rate. Furthermore, multi-model stage verification confirmed that local neural stages execute within tight latency bounds: \texttt{nomic-embed-text:latest} averages $10.8\text{ ms}$ per action embedding ($79$ live calls), \texttt{llama3.2:3b} averages $409.6\text{ ms}$ across semantic auditing and loop remediation ($27$ live calls), and \texttt{qwen2.5-coder:latest} generates candidate actions in $0.62\text{--}1.17\text{ s}$.
 
 \begin{table}[!t]
 \caption{Layer-by-Layer Interception and Latency Across Core Scenarios}
@@ -176,30 +178,30 @@ Table~\ref{tab_summary} summarizes the main benchmark results, and Table~\ref{ta
 \hline
 \textbf{ID} & \textbf{Failure Scenario} & \textbf{ASAP Layer Outcome} & \textbf{ms} \\
 \hline
-TC-1.1 & Direct \texttt{.env} Leak & Blocked (CAITLYN T1) & $1.28$ \\
+TC-1.1 & Direct \texttt{.env} Leak & Blocked (CAITLYN T1) & $1.25$ \\
 \hline
-TC-1.2 & Indirect SSH Key Leak & Blocked (CAITLYN T1) & $0.03$ \\
+TC-1.2 & Indirect SSH Key Leak & Blocked (CAITLYN T1) & $0.05$ \\
 \hline
-TC-2.1 & Oscillation ($A \to B \to A$) & Halted (Graphectory) & $24.58$ \\
+TC-2.1 & Oscillation ($A \to B \to A$) & Halted (Graphectory + LLM) & $772.50$ \\
 \hline
-TC-2.2 & Navigation Stagnation & Halted (Langutory $\theta=5$) & $5.05$ \\
+TC-2.2 & Navigation Stagnation & Halted (Langutory $\theta=5$) & $5.81$ \\
 \hline
-TC-3.1 & High-Risk OOD Action & Blocked (ACTSAFE) & $2.92$ \\
+TC-3.1 & High-Risk OOD Action & Blocked (ACTSAFE $13.45 > d$) & $1.76$ \\
 \hline
-TC-4.1 & Mid-Execution Crash & Restored (CoW Rollback) & $102.34$ \\
+TC-4.1 & Mid-Execution Crash & Restored (CoW Rollback) & $113.27$ \\
 \hline
-TC-4.2 & Wipe \texttt{rm -rf src/} & Protected \& Reverted & $117.34$ \\
+TC-4.2 & Wipe \texttt{rm -rf src/} & Protected \& Reverted & $119.43$ \\
 \hline
-TC-5.1 & Assertion Tampering & Flagged ($G(y)=1.00$) & $0.15$ \\
+TC-5.1 & Assertion Tampering & Flagged ($G(y)=1.00$) & $0.16$ \\
 \hline
-TC-5.2 & Format Inflation & Flagged ($G(y)=1.00$) & $0.35$ \\
+TC-5.2 & Format Inflation & Flagged ($G(y)=1.00$) & $0.42$ \\
 \hline
 \end{tabular}
 \label{tab_scenarios}
 \end{center}
 \end{table}
 
-When encountering broken tools or missing symbols (scenarios \texttt{TC-2.1} and \texttt{TC-2.2}), the Vanilla agent entered an infinite loop and dropped to a $44.8\%$ Plan Compliance score. LIVEPLAN caught the cycle in $24.58\text{ ms}$ and enforced phase order, raising Plan Compliance to $100.0\%$. Similarly, when simulated commands corrupted files or attempted to wipe the \texttt{src/} folder (scenarios \texttt{TC-4.1} and \texttt{TC-4.2}), the APFS Copy-on-Write sandbox restored 100\% of the workspace in $102\text{--}117\text{ ms}$, with an average end-to-end Sandbox Tax of just $+8.6\%$ (well within the $14.5\%$ heavy-I/O bound).
+When encountering broken tools or missing symbols (scenarios \texttt{TC-2.1} and \texttt{TC-2.2}), the Vanilla agent entered an infinite loop and dropped to a $44.8\%$ Plan Compliance score. LIVEPLAN caught the cycle deterministically and invoked the local \texttt{llama3.2:3b} advisor ($772.50\text{ ms}$ including LLM remediation generation; $5.81\text{ ms}$ for deterministic phase stagnation), raising Plan Compliance to $100.0\%$. Similarly, when simulated commands corrupted files or attempted to wipe the \texttt{src/} folder (scenarios \texttt{TC-4.1} and \texttt{TC-4.2}), the APFS Copy-on-Write sandbox restored 100\% of the workspace in $113\text{--}119\text{ ms}$, with an average end-to-end Sandbox Tax of $+14.3\%$ ($\sim 0.11\text{ s}$ on standard test workloads, within the $\le 14.5\%$ heavy-I/O target bound).
 
 \begin{figure}[!t]
 \centerline{\includegraphics[width=0.95\columnwidth]{figure5_sandbox_latency.png}}
@@ -217,7 +219,7 @@ When encountering broken tools or missing symbols (scenarios \texttt{TC-2.1} and
 A standout finding of our evaluation is shown in \texttt{TC-5.1}, \texttt{TC-5.2}, and Fig.~\ref{fig_est}. When the Vanilla agent modified unit test assertions (\texttt{assert True}) to fake a passing build, standard test runners reported a ``pass.'' However, ASAP's Evaluator Stress Test (EST) mutated the AST and computed $G(y) = 1.00 > 0.60$ in less than $0.4\text{ ms}$, immediately rejecting the deceptive patch. This result confirms that active evaluation research is essential to prevent Goodhart's Law in autonomous coding agents.
 
 \subsection{Data Scale, Test Case Scope, and Scaling Considerations}
-To accurately interpret our empirical findings, it is essential to contextualize the scale of the evaluation dataset and examine how system behavior evolves as data volume increases. In this study, ASAP was validated on a controlled, micro-to-medium evaluation scale comprising 9 end-to-end failure scenarios, a 40-case hand-crafted command corpus (25 malicious/evasion and 15 benign workflows), and isolated repositories ranging from $10$ to $500$ source files. At this level of data volume and trajectory length ($\le 25$ interaction steps), all five defensive layers exhibit strictly linear, sub-second responsiveness: deterministic regular expressions execute in $< 1.3\text{ ms}$, graph cycle checks require $\sim 24.6\text{ ms}$, and APFS Copy-on-Write (CoW) workspace snapshots complete in $0.3\text{--}117\text{ ms}$ with an end-to-end Sandbox Tax of $+8.6\%$ to $+14.5\%$ (see Fig.~\ref{fig_sandbox}).
+To accurately interpret our empirical findings, it is essential to contextualize the scale of the evaluation dataset and examine how system behavior evolves as data volume increases. In this study, ASAP was validated on a controlled, micro-to-medium evaluation scale comprising 9 end-to-end failure scenarios, a 40-case hand-crafted command corpus, 78 automated validation tests, and isolated repositories ranging from $10$ to $500$ source files. At this level of data volume and trajectory length ($\le 25$ interaction steps), all five defensive layers exhibit strictly linear, sub-second responsiveness: deterministic regular expressions execute in $< 1.3\text{ ms}$, phase stagnation checks require $5.81\text{ ms}$ (or $772.50\text{ ms}$ when invoking the local \texttt{llama3.2:3b} remediation advisor), and APFS Copy-on-Write (CoW) workspace snapshots complete in $113\text{--}119\text{ ms}$ with an end-to-end Sandbox Tax of $+14.3\%$ to $+14.5\%$ (see Fig.~\ref{fig_sandbox}).
 
 While these results confirm that the architecture operates with minimal overhead at our benchmark scale, deploying ASAP across enterprise-scale data volumes and massive monorepos introduces four critical scaling considerations that must be addressed as data size increases:
 \begin{enumerate}

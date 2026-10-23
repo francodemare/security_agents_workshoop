@@ -50,6 +50,10 @@ class TransactionalSandbox:
         Creates an instant snapshot of the workspace directory.
         Returns the snapshot directory path.
         """
+        if self._active_transaction and self.snapshot_dir and os.path.exists(self.snapshot_dir):
+            shutil.rmtree(self.snapshot_dir, ignore_errors=True)
+            self.snapshot_dir = None
+
         if not os.path.exists(self.workspace_dir):
             os.makedirs(self.workspace_dir, exist_ok=True)
 

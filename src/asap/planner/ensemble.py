@@ -28,17 +28,18 @@ class WorldModelEnsemble(nn.Module):
         self.action_dim = action_dim
         self.ensemble_size = ensemble_size
 
-        torch.manual_seed(seed)
-        self.models = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(state_dim + action_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, state_dim + 1),  # [state_preds, cost_pred]
-            )
-            for _ in range(ensemble_size)
-        ])
+        with torch.random.fork_rng():
+            torch.manual_seed(seed)
+            self.models = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(state_dim + action_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, state_dim + 1),  # [state_preds, cost_pred]
+                )
+                for _ in range(ensemble_size)
+            ])
 
         if calibrate:
             self.calibrate(seed=seed)
@@ -51,11 +52,12 @@ class WorldModelEnsemble(nn.Module):
         - Critical/destructive/exfiltration actions (risk features >= 0.5) -> cost >= 1.2 (above barrier d=1.0)
         - OOD states -> elevated epistemic disagreement
         """
+        param_device = next(self.parameters()).device
         g = torch.Generator().manual_seed(seed)
         n = 100
-        states = torch.zeros((n, self.state_dim))
+        states = torch.zeros((n, self.state_dim), device=param_device)
         # Samples across [-1.0, 1.0]
-        actions = (torch.rand((n, self.action_dim), generator=g) * 2.0) - 1.0
+        actions = ((torch.rand((n, self.action_dim), generator=g) * 2.0) - 1.0).to(param_device)
 
         # Risk mapping: highest of destructiveness and network risk features
         max_feat = torch.maximum(actions[:, 0], actions[:, 1])
@@ -65,7 +67,7 @@ class WorldModelEnsemble(nn.Module):
         opt = torch.optim.Adam(self.parameters(), lr=lr)
         for _ in range(steps):
             opt.zero_grad()
-            total_loss = torch.tensor(0.0)
+            total_loss = torch.tensor(0.0, device=param_device)
             x = torch.cat([states, actions], dim=-1)
             for m in self.models:
                 preds = m(x)

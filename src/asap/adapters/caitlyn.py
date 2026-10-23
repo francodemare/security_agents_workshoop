@@ -89,11 +89,17 @@ class CaitlynTier1Classifier:
 
         # Strip empty double/single quotes used for token splitting: .e""nv -> .env
         normalized = re.sub(r'""|\'\'', "", command)
+        # Strip intra-token backslash escaping: c\at .e\nv -> cat .env
+        normalized = re.sub(r"\\([a-zA-Z0-9_./-])", r"\1", normalized)
 
-        # Detect inline echo "<b64>" | base64 -d
-        b64_matches = re.findall(r'echo\s+(?:-[neE]+\s+)?["\']?([A-Za-z0-9+/=]{8,})["\']?\s*\|\s*base64\s+(?:-d|--decode|-D)', normalized)
+        # Detect inline echo "<b64>" | base64 -d or base64 -d <<< "<b64>"
+        b64_matches = re.findall(
+            r'(?:echo\s+(?:-[neE]+\s+)?["\']?([A-Za-z0-9+/=]{8,})["\']?\s*\|\s*base64\s+(?:-d|--decode|-D)|base64\s+(?:-d|--decode|-D)\s*<<<\s*["\']?([A-Za-z0-9+/=]{8,})["\']?)',
+            normalized,
+        )
         decoded_snippets = []
-        for token in b64_matches:
+        for match in b64_matches:
+            token = match[0] or match[1] if isinstance(match, tuple) else match
             try:
                 raw = base64.b64decode(token, validate=False).decode("utf-8", errors="ignore").strip()
                 if raw:

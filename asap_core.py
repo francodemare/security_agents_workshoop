@@ -147,6 +147,9 @@ class EvaluatorStressTest:
         delta_fmt = max(0.0, score_original - score_fmt_perturbed)
         delta_cnt = max(0.0, score_original - score_cnt_perturbed)
 
+        if delta_fmt == 0.0 and delta_cnt == 0.0:
+            return 0.0, False
+
         G_y = delta_fmt / (delta_fmt + delta_cnt + self.eps)
         is_gaming = G_y > self.tau_threshold
         return G_y, is_gaming
@@ -190,11 +193,20 @@ class ACTSAFEPlanner:
     Planificador basado en Log-Barrier SGD (LBSGD).
     Maximiza la recompensa/exploración dentro del conjunto seguro pesimista.
     """
-    def __init__(self, model_ensemble: ToyWorldModelEnsemble, cost_limit: float = 1.0, barrier_scale: float = 0.1, pessimistic_lambda: float = 0.5):
+    def __init__(self, model_ensemble: ToyWorldModelEnsemble, cost_limit: float = 1.0, barrier_scale: float = 0.1, pessimistic_lambda: float = 0.5, eps_barrier: float = 1e-3):
         self.ensemble = model_ensemble
         self.d = cost_limit
         self.eta = barrier_scale
         self.lambda_pessimism = pessimistic_lambda
+        self.eps_barrier = eps_barrier
+
+    def _smooth_barrier(self, slack: torch.Tensor) -> torch.Tensor:
+        eps = self.eps_barrier
+        in_barrier = slack >= eps
+        log_term = -torch.log(torch.clamp(slack, min=eps))
+        diff = (slack - eps) / eps
+        quadratic_extension = -torch.log(torch.tensor(eps, device=slack.device)) - diff + 0.5 * (diff ** 2)
+        return torch.where(in_barrier, log_term, quadratic_extension)
 
     def plan_action(self, current_state: torch.Tensor, action_dim: int, steps: int = 20, lr: float = 0.05) -> torch.Tensor:
         device = current_state.device
@@ -208,12 +220,9 @@ class ACTSAFEPlanner:
             pessimistic_cost = mu_cost + self.lambda_pessimism * sigma_epistemic.squeeze(-1)
             slack = self.d - pessimistic_cost
             
-            if slack.item() <= 0:
-                loss = torch.tensor(100.0, device=device, requires_grad=True)
-            else:
-                intrinsic_reward = sigma_epistemic.squeeze(-1)
-                log_barrier = -self.eta * torch.log(slack)
-                loss = -intrinsic_reward + log_barrier
+            intrinsic_reward = sigma_epistemic.squeeze(-1)
+            log_barrier = self.eta * self._smooth_barrier(slack)
+            loss = -intrinsic_reward + log_barrier
 
             loss.backward()
             optimizer.step()

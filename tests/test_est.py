@@ -84,3 +84,21 @@ def test_case():
     g2, is_gaming2, _ = est.stress_test_code(hacked_code_2, dummy_eval)
     assert is_gaming2
     assert g2 == 1.0
+
+
+def test_format_mutator_function_scope_and_kwargs_preservation():
+    """Regression test (ARCH-01): FormatMutator scopes var_map per function and preserves keyword args."""
+    code = """
+x = 10
+
+def compute(x, scale=2):
+    \"\"\"Multiplies x by scale.\"\"\"
+    return x * scale
+
+def caller():
+    return compute(x, scale=3)
+"""
+    fmt_code, _ = generate_ast_perturbations(code)
+    ns = {}
+    exec(fmt_code, ns)
+    assert ns["caller"]() == 30

@@ -63,3 +63,18 @@ def test_action_vector_projector_nomic_embedding():
     assert torch.all(projected >= -1.0)
     assert torch.all(projected <= 1.0)
 
+
+def test_ensemble_preserves_global_rng_and_supports_device_recalibration():
+    """Regression test (SEC-03): WorldModelEnsemble preserves global RNG and calibrates on MPS/CPU."""
+    torch.manual_seed(12345)
+    expected_next = torch.rand(3)
+
+    torch.manual_seed(12345)
+    device = get_device()
+    ensemble = WorldModelEnsemble(state_dim=4, action_dim=2, ensemble_size=3).to(device)
+    actual_next = torch.rand(3)
+    assert torch.allclose(expected_next, actual_next), "WorldModelEnsemble mutated global torch RNG"
+
+    # Recalibrating after .to(device) must not raise device mismatch
+    ensemble.calibrate(steps=5, seed=42)
+

@@ -72,12 +72,16 @@ class FormatMutator(ast.NodeTransformer):
     Renames local function arguments/variables to synthetic identifiers and strips docstrings.
     """
 
-    def __init__(self):
+    def __init__(self, kwarg_names: Optional[set] = None):
         super().__init__()
         self.var_map = {}
         self.counter = 0
+        self.kwarg_names = kwarg_names or set()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        prev_map = self.var_map.copy()
+        local_map = prev_map.copy()
+
         # Don't rename magic methods or top-level entrypoints
         if not node.name.startswith("__"):
             # Clean docstrings
@@ -89,15 +93,23 @@ class FormatMutator(ast.NodeTransformer):
             ):
                 node.body.pop(0)
 
-            # Rename local arguments
+            # Rename local arguments (skipping any used as keyword arguments at call sites)
             for arg in node.args.args:
-                if arg.arg not in ("self", "cls") and not arg.arg.startswith("__"):
+                if (
+                    arg.arg not in ("self", "cls")
+                    and not arg.arg.startswith("__")
+                    and arg.arg not in self.kwarg_names
+                ):
                     new_name = f"_synth_arg_{self.counter}"
                     self.counter += 1
-                    self.var_map[arg.arg] = new_name
+                    local_map[arg.arg] = new_name
                     arg.arg = new_name
 
-        return self.generic_visit(node)
+        self.var_map = local_map
+        try:
+            return self.generic_visit(node)
+        finally:
+            self.var_map = prev_map
 
     def visit_Name(self, node: ast.Name) -> ast.AST:
         if node.id in self.var_map:
@@ -159,7 +171,14 @@ def generate_ast_perturbations(source_code: str) -> Tuple[str, str]:
 
     # 1. Format Perturbation
     tree_fmt = ast.parse(source_code)
-    fmt_mutator = FormatMutator()
+    kwarg_names = {
+        kw.arg
+        for sub in ast.walk(tree_fmt)
+        if isinstance(sub, ast.Call)
+        for kw in sub.keywords
+        if kw.arg is not None
+    }
+    fmt_mutator = FormatMutator(kwarg_names=kwarg_names)
     tree_fmt = fmt_mutator.visit(tree_fmt)
     ast.fix_missing_locations(tree_fmt)
     fmt_code = ast.unparse(tree_fmt)

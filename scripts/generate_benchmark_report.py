@@ -472,7 +472,7 @@ def plot_consolidated_dashboard(caitlyn_d, liveplan_d, sandbox_d, est_d):
     kpis = (
         "ASAP EXECUTIVE SUMMARY\n"
         "-------------------------------\n"
-        "• Test Cases Passed: 49/49 (100%)\n"
+        "• Test Cases Passed: 78/78 (100%)\n"
         "• Post-CAITLYN ASR: 0.0%\n"
         "• Tier-1 Latency: < 1 ms\n"
         "• Plan Compliance: 99.3%\n"

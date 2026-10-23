@@ -80,3 +80,18 @@ def test_runner_execution_and_timeout(temp_workspace):
     res_timeout = runner.run("sleep 2", timeout=0.5)
     assert res_timeout.exit_code != 0
     assert res_timeout.timed_out
+
+
+def test_sandbox_reentrant_begin_transaction_cleans_previous_snapshot(temp_workspace):
+    """Regression test (SEC-01): re-entrant begin_transaction() must not leak orphaned snapshot dirs."""
+    sandbox = TransactionalSandbox(temp_workspace)
+    first_snap = sandbox.begin_transaction()
+    assert os.path.exists(first_snap)
+
+    second_snap = sandbox.begin_transaction()
+    assert second_snap != first_snap
+    assert not os.path.exists(first_snap), "Previous snapshot directory was leaked on re-entrant begin_transaction"
+    assert os.path.exists(second_snap)
+
+    sandbox.commit()
+    assert not os.path.exists(second_snap)
